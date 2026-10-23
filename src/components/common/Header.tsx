@@ -1,9 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Home, Users, Sparkles, ChevronDown, Gamepad2, Layers } from 'lucide-react';
+import { Home, Users, Sparkles, ChevronDown, Gamepad2, Layers, User as UserIcon } from 'lucide-react';
 import { SoundToggle } from './SoundToggle';
 import { sounds } from '../../utils/sound';
+import { useAuth } from '../../context/AuthContext';
+import { TeacherAuthModal } from '../auth/TeacherAuthModal';
 
 interface HeaderProps {
+
   title?: string;
   subtitle?: string;
   onBack?: () => void;
@@ -23,9 +26,12 @@ export const Header: React.FC<HeaderProps> = ({
   onJoinRoom,
   rightAction,
 }) => {
+  const { user } = useAuth();
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const hoverTimerRef = useRef<NodeJS.Timeout | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
 
   const handleLogoClick = () => {
     sounds.playClick();
@@ -244,13 +250,54 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
 
-        {/* Right: Sound Toggle Button & Optional Extra Action */}
+        {/* Right: Sound Toggle, Teacher Auth & Optional Extra Action */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {rightAction}
+
+          {/* Teacher Login / Account button */}
+          {user ? (
+            <button
+              type="button"
+              onClick={() => {
+                sounds.playClick();
+                setIsAuthModalOpen(true);
+              }}
+              className="p-1 sm:px-2.5 sm:py-1.5 rounded-full bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-extrabold text-xs flex items-center gap-1.5 border border-indigo-200 transition active:scale-95 cursor-pointer shadow-2xs"
+              title={`Đã đăng nhập: ${user.user_metadata?.full_name || user.email}. Bấm để xem thông tin`}
+            >
+              <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-indigo-600 to-purple-600 text-white flex items-center justify-center text-xs font-black shadow-xs">
+                {user.email?.charAt(0).toUpperCase() || 'C'}
+              </div>
+              <span className="hidden md:inline truncate max-w-[90px]">
+                {user.user_metadata?.full_name || 'Cô giáo'}
+              </span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                sounds.playClick();
+                setIsAuthModalOpen(true);
+              }}
+              className="p-1.5 sm:px-3 sm:py-2 rounded-full bg-white hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 font-extrabold text-xs flex items-center gap-1.5 border border-slate-200 hover:border-indigo-300 transition active:scale-95 cursor-pointer shadow-2xs"
+              title="Đăng nhập tài khoản Giáo viên (Supabase Cloud)"
+            >
+              <UserIcon className="w-3.5 h-3.5 text-indigo-600" />
+              <span className="hidden sm:inline">Tài khoản</span>
+            </button>
+          )}
+
           <SoundToggle />
         </div>
       </div>
+
+      {/* Teacher Authentication & Account Modal */}
+      <TeacherAuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+      />
     </header>
   );
 };
+
 

@@ -1,9 +1,12 @@
 import { Game, GameSettings, SessionState } from '../types/game';
+import type { RealtimeChannel } from '@supabase/supabase-js';
+import { supabase, isSupabaseConfigured } from './supabase';
 
 type EventCallback = (data: any) => void;
 
 export class RealtimeClient {
   private ws: WebSocket | null = null;
+  private supabaseChannel: RealtimeChannel | null = null;
   private listeners: Map<string, Set<EventCallback>> = new Map();
   private reconnectTimer: number | null = null;
   private isConnected: boolean = false;
@@ -18,6 +21,7 @@ export class RealtimeClient {
     this.initNetworkListeners();
     this.connect();
   }
+
 
   private initNetworkListeners() {
     if (typeof window !== 'undefined') {
@@ -85,10 +89,17 @@ export class RealtimeClient {
           if (payload.type === 'session_created' && payload.data?.session?.roomCode) {
             this.currentRoomCode = payload.data.session.roomCode.toUpperCase();
             this.currentRole = 'host';
+            if (this.currentRoomCode) {
+              this.initSupabaseRoom(this.currentRoomCode, 'host');
+            }
           }
           if (payload.type === 'session_updated' && payload.data?.session?.roomCode && this.currentRole === 'host') {
             this.currentRoomCode = payload.data.session.roomCode.toUpperCase();
+            if (this.currentRoomCode) {
+              this.initSupabaseRoom(this.currentRoomCode, 'host');
+            }
           }
+
 
           if (payload.type) {
             this.emit(payload.type, payload.data ?? payload);
@@ -123,15 +134,102 @@ export class RealtimeClient {
     }, 1500);
   }
 
+  /**
+   * Initializes or subscribes to a Supabase Realtime Channel for serverless room communication
+   */
+  public initSupabaseRoom(roomCode: string, role: 'host' | 'player') {
+    if (!supabase || !isSupabaseConfigured() || !roomCode) return;
+
+    const channelName = `room:${roomCode.toUpperCase()}`;
+    if (this.supabaseChannel && this.supabaseChannel.topic === `realtime:${channelName}`) {
+      return;
+    }
+
+    if (this.supabaseChannel) {
+      try {
+        this.supabaseChannel.unsubscribe();
+      } catch {}
+      this.supabaseChannel = null;
+    }
+
+    this.supabaseChannel = supabase.channel(channelName, {
+      config: {
+        broadcast: { self: false },
+        presence: { key: this.currentDeviceId || this.currentTeamId || `${role}_${Date.now()}` },
+      },
+    });
+
+    this.supabaseChannel
+      .on('broadcast', { event: '*' }, ({ event, payload }) => {
+        if (payload) {
+          if (payload.serverTime) {
+            this.serverTimeOffset = payload.serverTime - Date.now();
+          }
+          const eventType = payload.type || event;
+          this.emit(eventType, payload.data ?? payload);
+        }
+      })
+      .on('presence', { event: 'sync' }, () => {
+        const state = this.supabaseChannel?.presenceState() || {};
+        const onlineTeams: Record<string, { online: boolean; teamId: string; teamName?: string }> = {};
+        Object.values(state).forEach((presences: any) => {
+          if (Array.isArray(presences)) {
+            presences.forEach((p: any) => {
+              if (p.teamId) {
+                onlineTeams[p.teamId] = {
+                  online: true,
+                  teamId: p.teamId,
+                  teamName: p.teamName,
+                };
+              }
+            });
+          }
+        });
+        if (Object.keys(onlineTeams).length > 0) {
+          this.emit('teams_updated', { roomCode: roomCode.toUpperCase(), teams: onlineTeams });
+        }
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          this.isConnected = true;
+          this.emit('connection_change', { status: 'connected', online: true });
+          if (role === 'player' && this.currentTeamId) {
+            this.supabaseChannel?.track({
+              teamId: this.currentTeamId,
+              deviceId: this.currentDeviceId,
+              online: true,
+              role: 'player',
+              joinedAt: Date.now(),
+            });
+          }
+        }
+      });
+  }
+
   public send(payload: object) {
     const raw = JSON.stringify(payload);
+    // 1. Send via local WebSocket if connected
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(raw);
     } else {
       this.pendingQueue.push(raw);
       this.connect();
     }
+
+    // 2. Broadcast through Supabase Realtime Channel if configured
+    if (this.supabaseChannel && isSupabaseConfigured()) {
+      const eventName = (payload as any).type || 'message';
+      this.supabaseChannel.send({
+        type: 'broadcast',
+        event: eventName,
+        payload: {
+          ...payload,
+          serverTime: Date.now(),
+        },
+      }).catch(() => {});
+    }
   }
+
 
   public on(event: string, callback: EventCallback) {
     if (!this.listeners.has(event)) {
@@ -174,6 +272,42 @@ export class RealtimeClient {
   // High-level Actions
   public createSession(game: Game, settings?: GameSettings) {
     this.currentRole = 'host';
+    if ((!this.ws || this.ws.readyState !== WebSocket.OPEN) && isSupabaseConfigured()) {
+      const roomCode = Math.floor(1000 + Math.random() * 9000).toString();
+      this.currentRoomCode = roomCode;
+      this.initSupabaseRoom(roomCode, 'host');
+      const initialSession: SessionState = {
+        sessionId: `session_${Date.now()}_${roomCode}`,
+        roomCode,
+        gameId: game.id,
+        game,
+        status: 'lobby',
+        currentQuestionIndex: 0,
+        questionStatus: 'waiting',
+        questionStartTime: null,
+        questionTimeLimit: settings?.timePerQuestion ?? 30,
+        teams: {},
+        answers: {},
+        settings: {
+          timePerQuestion: settings?.timePerQuestion ?? 30,
+          soundEffects: settings?.soundEffects ?? true,
+          maxTeams: settings?.maxTeams ?? 12,
+          speedBonus: settings?.speedBonus ?? true,
+        },
+        createdAt: Date.now(),
+        startedAt: null,
+        endedAt: null,
+      };
+      setTimeout(() => {
+        this.emit('session_created', { session: initialSession });
+        this.send({
+          type: 'session_updated',
+          data: { session: initialSession },
+        });
+      }, 50);
+      return;
+    }
+
     this.send({
       type: 'host:create_session',
       game,
@@ -183,6 +317,46 @@ export class RealtimeClient {
 
   public createDualSession(gameA: Game, gameB: Game, settings?: GameSettings) {
     this.currentRole = 'host';
+    if ((!this.ws || this.ws.readyState !== WebSocket.OPEN) && isSupabaseConfigured()) {
+      const roomCode = Math.floor(1000 + Math.random() * 9000).toString();
+      this.currentRoomCode = roomCode;
+      this.initSupabaseRoom(roomCode, 'host');
+      const initialSession: SessionState = {
+        sessionId: `session_dual_${Date.now()}_${roomCode}`,
+        roomCode,
+        gameId: gameA.id,
+        game: gameA,
+        gameB,
+        isDualMode: true,
+        status: 'lobby',
+        currentQuestionIndex: 0,
+        questionStatus: 'waiting',
+        questionStartTime: null,
+        questionTimeLimit: settings?.timePerQuestion ?? 30,
+        teams: {},
+        answers: {},
+        teamAssignments: {},
+        settings: {
+          timePerQuestion: settings?.timePerQuestion ?? 30,
+          soundEffects: settings?.soundEffects ?? true,
+          maxTeams: settings?.maxTeams ?? 12,
+          speedBonus: settings?.speedBonus ?? true,
+        },
+        createdAt: Date.now(),
+        startedAt: null,
+        endedAt: null,
+      };
+
+      setTimeout(() => {
+        this.emit('session_created', { session: initialSession });
+        this.send({
+          type: 'session_updated',
+          data: { session: initialSession },
+        });
+      }, 50);
+      return;
+    }
+
     this.send({
       type: 'host:create_session',
       game: gameA,
@@ -191,6 +365,7 @@ export class RealtimeClient {
       settings: settings || gameA.settings,
     });
   }
+
 
   public assignTeamSet(roomCode: string, teamId: string, set: 'A' | 'B') {
     this.send({
@@ -237,6 +412,7 @@ export class RealtimeClient {
     this.currentRole = 'player';
     this.currentTeamId = teamId;
     this.currentDeviceId = deviceId;
+    this.initSupabaseRoom(this.currentRoomCode, 'player');
 
     this.send({
       type: 'player:join',
@@ -251,6 +427,7 @@ export class RealtimeClient {
 
   public watchRoom(roomCode: string, deviceId?: string) {
     this.currentRoomCode = roomCode.toUpperCase();
+    this.initSupabaseRoom(this.currentRoomCode, 'player');
     this.send({
       type: 'player:watch_room',
       roomCode: this.currentRoomCode,
@@ -266,6 +443,13 @@ export class RealtimeClient {
       teamId,
       deviceId,
     });
+    if (this.supabaseChannel) {
+      try {
+        this.supabaseChannel.untrack();
+        this.supabaseChannel.unsubscribe();
+      } catch {}
+      this.supabaseChannel = null;
+    }
     this.currentRoomCode = null;
     this.currentRole = null;
     this.currentTeamId = null;
@@ -291,11 +475,13 @@ export class RealtimeClient {
   public registerHost(roomCode: string) {
     this.currentRoomCode = roomCode.toUpperCase();
     this.currentRole = 'host';
+    this.initSupabaseRoom(this.currentRoomCode, 'host');
     this.send({
       type: 'host:register',
       roomCode: this.currentRoomCode,
     });
   }
+
 
   public updateRoomSettings(roomCode: string, settings: Partial<GameSettings>) {
     this.send({

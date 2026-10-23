@@ -1,5 +1,7 @@
 import { Game } from '../types/game';
 import { DEFAULT_GAMES } from '../data/defaultGames';
+import { supabase, isSupabaseConfigured } from './supabase';
+
 
 const STORAGE_KEY = 'vuihoc_custom_games';
 const TRASH_STORAGE_KEY = 'vuihoc_trash_games';
@@ -347,6 +349,52 @@ async function asyncHydrateFromPersistentStores(): Promise<void> {
       // Offline fallback
     }
 
+    // 3. Fetch from Supabase Cloud Database if configured
+    if (supabase && isSupabaseConfigured()) {
+      try {
+        const { data: cloudGames, error } = await supabase
+          .from('games')
+          .select('*')
+          .is('deleted_at', null)
+          .order('updated_at', { ascending: false });
+
+        if (!error && Array.isArray(cloudGames)) {
+          const trashIds = new Set(cachedTrash.map(g => g.id));
+          cloudGames.forEach((cg: any) => {
+            if (!trashIds.has(cg.id) && !cachedPurgedDefaultIds.has(cg.id)) {
+              const cloudGame: Game = {
+                id: cg.id,
+                title: cg.title,
+                description: cg.description || '',
+                theme: cg.theme || 'default',
+                category: cg.category || 'default',
+                coverImage: cg.cover_image || undefined,
+                gameType: cg.type || 'multiple_choice',
+                questions: cg.questions || [],
+                settings: cg.settings || { timePerQuestion: 30, speedBonus: true, maxTeams: 12, soundEffects: true },
+                createdAt: cg.created_at ? new Date(cg.created_at).getTime() : Date.now(),
+                playCount: cg.play_count || 0,
+              };
+
+              const existingIdx = cachedGames.findIndex(g => g.id === cg.id);
+              if (existingIdx >= 0) {
+                // If local doesn't have custom questions but cloud does, overwrite
+                cachedGames[existingIdx] = cloudGame;
+              } else {
+                cachedGames.push(cloudGame);
+              }
+              idbSaveGame(cloudGame);
+              hasChanges = true;
+            }
+          });
+        }
+
+      } catch (cloudErr) {
+        console.warn('[Supabase] Hydration warning:', cloudErr);
+      }
+    }
+
+
     if (hasChanges) {
       safeSaveGamesToLocalStorage(cachedGames);
       safeSaveTrashToLocalStorage(cachedTrash);
@@ -400,6 +448,64 @@ export function getGameById(id: string): Game | undefined {
   return g;
 }
 
+// ----------------------------------------------------
+// SUPABASE ASYNC CLOUD SYNC HELPERS
+// ----------------------------------------------------
+async function syncGameToSupabase(game: Game) {
+  if (!supabase || !isSupabaseConfigured()) return;
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from('games').upsert({
+      id: game.id,
+      user_id: user?.id || null,
+      title: game.title,
+      description: game.description || '',
+      cover_image: game.coverImage || null,
+      type: game.gameType || 'quiz',
+      questions: game.questions || [],
+      settings: game.settings || { maxTeams: 12 },
+      is_public: true,
+      deleted_at: null,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn('[Supabase] Sync game error:', err);
+  }
+}
+
+async function syncSoftDeleteToSupabase(id: string) {
+  if (!supabase || !isSupabaseConfigured()) return;
+  try {
+    await supabase.from('games').update({
+      deleted_at: Date.now(),
+      updated_at: new Date().toISOString(),
+    }).eq('id', id);
+  } catch (err) {
+    console.warn('[Supabase] Soft-delete error:', err);
+  }
+}
+
+async function syncRestoreToSupabase(id: string) {
+  if (!supabase || !isSupabaseConfigured()) return;
+  try {
+    await supabase.from('games').update({
+      deleted_at: null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', id);
+  } catch (err) {
+    console.warn('[Supabase] Restore error:', err);
+  }
+}
+
+async function syncPermanentDeleteToSupabase(id: string) {
+  if (!supabase || !isSupabaseConfigured()) return;
+  try {
+    await supabase.from('games').delete().eq('id', id);
+  } catch (err) {
+    console.warn('[Supabase] Permanent delete error:', err);
+  }
+}
+
 export function saveGame(game: Game): void {
   // Ensure game is not in trash
   delete game.deletedAt;
@@ -433,6 +539,9 @@ export function saveGame(game: Game): void {
       body: JSON.stringify(game),
     }).catch(() => {});
   }
+
+  // Supabase Cloud Sync
+  syncGameToSupabase(game);
 
   notifyGameListeners();
   notifyTrashListeners();
@@ -474,6 +583,9 @@ export function moveToTrash(id: string): void {
     }).catch(() => {});
   }
 
+  // Supabase Cloud soft-delete
+  syncSoftDeleteToSupabase(id);
+
   notifyGameListeners();
   notifyTrashListeners();
 }
@@ -510,6 +622,9 @@ export function restoreFromTrash(id: string): void {
     }).catch(() => {});
   }
 
+  // Supabase Cloud restore
+  syncRestoreToSupabase(id);
+
   notifyGameListeners();
   notifyTrashListeners();
 }
@@ -537,9 +652,13 @@ export function permanentlyDeleteGame(id: string): void {
     }).catch(() => {});
   }
 
+  // Supabase Cloud permanent delete
+  syncPermanentDeleteToSupabase(id);
+
   notifyGameListeners();
   notifyTrashListeners();
 }
+
 
 /**
  * Empties all games from trash permanently
@@ -584,6 +703,26 @@ export function getGameHistory(): GameHistoryRecord[] {
   }
 }
 
+async function syncHistoryToSupabase(record: GameHistoryRecord) {
+  if (!supabase || !isSupabaseConfigured()) return;
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from('game_history').insert({
+      id: record.id,
+      room_code: record.roomCode,
+      game_title: record.gameTitle,
+      date: record.date,
+      teams_count: record.teamsCount,
+      questions_count: record.questionsCount,
+      winner_team_name: record.winnerTeamName,
+      winner_score: record.winnerScore,
+      created_by: user?.id || null,
+    });
+  } catch (err) {
+    console.warn('[Supabase] History sync error:', err);
+  }
+}
+
 export function saveGameHistory(record: GameHistoryRecord): void {
   if (typeof window === 'undefined') return;
   try {
@@ -597,7 +736,12 @@ export function saveGameHistory(record: GameHistoryRecord): void {
       localStorage.setItem('vuihoc_game_history', JSON.stringify(history.slice(0, 5)));
     } catch {}
   }
+
+  // Supabase Cloud History Sync
+  syncHistoryToSupabase(record);
 }
+
+
 
 // ----------------------------------------------------
 // FEATURED & FAVORITE GAMES
