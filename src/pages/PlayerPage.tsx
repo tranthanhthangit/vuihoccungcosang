@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { SessionState, ConnectedTeam, TeamAnswer } from '../types/game';
 import { realtime } from '../services/realtimeClient';
 import { PlayerJoin } from '../components/player/PlayerJoin';
@@ -43,6 +43,26 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
   const [isJoining, setIsJoining] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
 
+  const joinRetryTimerRef = useRef<number | null>(null);
+  const joinTimeoutTimerRef = useRef<number | null>(null);
+
+  const clearJoinTimers = () => {
+    if (joinRetryTimerRef.current) {
+      clearInterval(joinRetryTimerRef.current);
+      joinRetryTimerRef.current = null;
+    }
+    if (joinTimeoutTimerRef.current) {
+      clearTimeout(joinTimeoutTimerRef.current);
+      joinTimeoutTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      clearJoinTimers();
+    };
+  }, []);
+
   // Restore saved team and room on phone refresh (only for SAME room)
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -82,6 +102,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
 
     // Listen to join success
     const unsubJoin = realtime.on('join_success', (data: any) => {
+      clearJoinTimers();
       setSession(data.session);
       setJoinedTeam(data.team);
       setIsJoining(false);
@@ -110,6 +131,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
 
     // Listen to errors
     const unsubError = realtime.on('error', (data: any) => {
+      clearJoinTimers();
       setJoinError(data.message || 'Lỗi khi tham gia phòng');
       setIsJoining(false);
 
@@ -124,6 +146,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
     // Listen to team removed by host
     const unsubTeamRemoved = realtime.on('team_removed', (data: any) => {
       if (joinedTeam && data.teamId === joinedTeam.teamId) {
+        clearJoinTimers();
         setJoinError('Đội của bạn đã được đưa ra khỏi phòng.');
         setJoinedTeam(null);
       }
@@ -184,7 +207,33 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
     setIsJoining(true);
     setJoinError(null);
     setRoomCode(code);
+    clearJoinTimers();
+
     realtime.joinRoom(code, teamId, devId, customTeamName);
+
+    // Retry sending player:join every 1.5 seconds (up to 4 times) in case channel was connecting
+    let attempt = 0;
+    joinRetryTimerRef.current = window.setInterval(() => {
+      attempt++;
+      if (attempt >= 4) {
+        if (joinRetryTimerRef.current) clearInterval(joinRetryTimerRef.current);
+        return;
+      }
+      realtime.send({
+        type: 'player:join',
+        roomCode: code.toUpperCase(),
+        teamId,
+        deviceId: devId,
+        customTeamName: customTeamName?.trim() || undefined,
+      });
+    }, 1500);
+
+    // Timeout safety: after 8 seconds without response, release UI and show friendly message
+    joinTimeoutTimerRef.current = window.setTimeout(() => {
+      clearJoinTimers();
+      setIsJoining(false);
+      setJoinError(`Chưa thấy phòng ${code} phản hồi. Bạn hãy kiểm tra xem cô giáo đã ấn "Tạo phòng" chưa nhé!`);
+    }, 8000);
   };
 
   const handleSubmitAnswer = (answerId: string, answerIds?: string[]) => {

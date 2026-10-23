@@ -22,12 +22,15 @@ export const DEFAULT_TEAM_PRESETS: TeamPreset[] = [
 export class RealtimeClient {
   private ws: WebSocket | null = null;
   private supabaseChannel: RealtimeChannel | null = null;
+  private supabaseChannelSubscribed: boolean = false;
+  private pendingBroadcastQueue: object[] = [];
   private listeners: Map<string, Set<EventCallback>> = new Map();
   private reconnectTimer: number | null = null;
   private isConnected: boolean = false;
   private currentRoomCode: string | null = null;
   private currentRole: 'host' | 'player' | null = null;
   private currentTeamId: string | null = null;
+  private currentCustomTeamName?: string;
   private currentDeviceId: string | null = null;
   private pendingQueue: string[] = [];
   private serverTimeOffset: number = 0;
@@ -191,11 +194,13 @@ export class RealtimeClient {
         this.supabaseChannel.unsubscribe();
       } catch {}
       this.supabaseChannel = null;
+      this.supabaseChannelSubscribed = false;
     }
 
+    this.supabaseChannelSubscribed = false;
     this.supabaseChannel = supabase.channel(channelName, {
       config: {
-        broadcast: { self: false },
+        broadcast: { self: true },
         presence: { key: this.currentDeviceId || this.currentTeamId || `${role}_${Date.now()}` },
       },
     });
@@ -239,19 +244,58 @@ export class RealtimeClient {
       })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
+          this.supabaseChannelSubscribed = true;
           this.isConnected = true;
           this.emit('connection_change', { status: 'connected', online: true });
-          if (role === 'player' && this.currentTeamId) {
-            this.supabaseChannel?.track({
-              teamId: this.currentTeamId,
-              deviceId: this.currentDeviceId,
-              online: true,
-              role: 'player',
-              joinedAt: Date.now(),
-            });
+
+          // Flush queued broadcasts now that channel is ready
+          while (this.pendingBroadcastQueue.length > 0) {
+            const queued = this.pendingBroadcastQueue.shift();
+            if (queued) {
+              this.broadcast(queued);
+            }
           }
+
+          if (role === 'player') {
+            if (this.currentTeamId) {
+              this.supabaseChannel?.track({
+                teamId: this.currentTeamId,
+                deviceId: this.currentDeviceId,
+                online: true,
+                role: 'player',
+                joinedAt: Date.now(),
+              });
+              // Ensure player:join is sent immediately once channel is ready
+              this.send({
+                type: 'player:join',
+                roomCode: roomCode.toUpperCase(),
+                teamId: this.currentTeamId,
+                deviceId: this.currentDeviceId,
+                customTeamName: this.currentCustomTeamName,
+              });
+            } else {
+              // Request current room state snapshot
+              this.send({
+                type: 'sync_request',
+                roomCode: roomCode.toUpperCase(),
+              });
+            }
+          }
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          this.supabaseChannelSubscribed = false;
         }
       });
+  }
+
+  private persistServerlessSession() {
+    if (this.serverlessSession && typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(
+          `vuihoc_active_session_${this.serverlessSession.roomCode}`,
+          JSON.stringify(this.serverlessSession)
+        );
+      } catch {}
+    }
   }
 
   /**
@@ -259,6 +303,24 @@ export class RealtimeClient {
    */
   private handleServerlessHostIncoming(type: string, payload: any) {
     if (!this.serverlessSession) return;
+
+    if (type === 'player:watch_room' || type === 'sync_request') {
+      this.broadcast({
+        type: 'room_snapshot',
+        data: {
+          session: this.serverlessSession,
+        },
+      });
+      this.broadcast({
+        type: 'teams_updated',
+        data: {
+          roomCode: this.serverlessSession.roomCode,
+          teams: this.serverlessSession.teams,
+        },
+      });
+      this.broadcastSession(this.serverlessSession);
+      return;
+    }
 
     if (type === 'player:join') {
       const { teamId, customTeamName, deviceId } = payload;
@@ -279,6 +341,7 @@ export class RealtimeClient {
       };
 
       this.serverlessSession.teams[teamId] = team;
+      this.persistServerlessSession();
 
       // Broadcast join_success and session_updated to all players
       this.broadcast({
@@ -300,8 +363,6 @@ export class RealtimeClient {
       this.broadcastSession(this.serverlessSession);
       this.emit('team_joined', { team, teams: this.serverlessSession.teams });
       this.emit('session_updated', { session: this.serverlessSession });
-    } else if (type === 'sync_request') {
-      this.broadcastSession(this.serverlessSession);
     } else if (type === 'player:heartbeat') {
       const { teamId } = payload;
       if (teamId && this.serverlessSession.teams[teamId]) {
@@ -412,17 +473,24 @@ export class RealtimeClient {
   }
 
   public broadcast(payload: object) {
-    if (this.supabaseChannel && isSupabaseConfigured()) {
-      const eventName = (payload as any).type || 'message';
-      this.supabaseChannel.send({
-        type: 'broadcast',
-        event: eventName,
-        payload: {
-          ...payload,
-          serverTime: Date.now(),
-        },
-      }).catch(() => {});
+    if (!supabase || !isSupabaseConfigured()) return;
+
+    if (!this.supabaseChannel || !this.supabaseChannelSubscribed) {
+      this.pendingBroadcastQueue.push(payload);
+      return;
     }
+
+    const eventName = (payload as any).type || 'message';
+    this.supabaseChannel.send({
+      type: 'broadcast',
+      event: eventName,
+      payload: {
+        ...payload,
+        serverTime: Date.now(),
+      },
+    }).catch((err) => {
+      console.warn('[RealtimeClient] Supabase broadcast error:', err);
+    });
   }
 
   public send(payload: object) {
@@ -515,6 +583,7 @@ export class RealtimeClient {
       };
 
       this.serverlessSession = initialSession;
+      this.persistServerlessSession();
 
       setTimeout(() => {
         this.emit('session_created', { session: initialSession });
@@ -567,6 +636,7 @@ export class RealtimeClient {
       };
 
       this.serverlessSession = initialSession;
+      this.persistServerlessSession();
 
       setTimeout(() => {
         this.emit('session_created', { session: initialSession });
@@ -649,6 +719,7 @@ export class RealtimeClient {
     this.currentRole = 'player';
     this.currentTeamId = teamId;
     this.currentDeviceId = deviceId;
+    this.currentCustomTeamName = customTeamName?.trim() || undefined;
     this.initSupabaseRoom(this.currentRoomCode, 'player');
 
     this.send({
@@ -656,7 +727,7 @@ export class RealtimeClient {
       roomCode: this.currentRoomCode,
       teamId,
       deviceId,
-      customTeamName: customTeamName?.trim() || undefined,
+      customTeamName: this.currentCustomTeamName,
     });
 
     this.startHeartbeat();
@@ -695,6 +766,7 @@ export class RealtimeClient {
   public kickTeam(roomCode: string, teamId: string) {
     if (this.serverlessSession && this.serverlessSession.teams[teamId]) {
       delete this.serverlessSession.teams[teamId];
+      this.persistServerlessSession();
       this.broadcast({ type: 'team_removed', data: { teamId } });
       this.broadcastSession(this.serverlessSession);
       this.emit('session_updated', { session: this.serverlessSession });
@@ -710,6 +782,7 @@ export class RealtimeClient {
   public updateTeamName(roomCode: string, teamId: string, customTeamName: string) {
     if (this.serverlessSession && this.serverlessSession.teams[teamId]) {
       this.serverlessSession.teams[teamId].teamName = customTeamName.trim();
+      this.persistServerlessSession();
       this.broadcastSession(this.serverlessSession);
       this.emit('session_updated', { session: this.serverlessSession });
     }
@@ -725,11 +798,30 @@ export class RealtimeClient {
   public registerHost(roomCode: string) {
     this.currentRoomCode = roomCode.toUpperCase();
     this.currentRole = 'host';
+
+    // Restore serverlessSession from localStorage if available
+    if (!this.serverlessSession && typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(`vuihoc_active_session_${this.currentRoomCode}`);
+        if (saved) {
+          this.serverlessSession = JSON.parse(saved);
+        }
+      } catch {}
+    }
+
     this.initSupabaseRoom(this.currentRoomCode, 'host');
     this.send({
       type: 'host:register',
       roomCode: this.currentRoomCode,
     });
+
+    if (this.serverlessSession) {
+      setTimeout(() => {
+        this.emit('session_created', { session: this.serverlessSession });
+        this.emit('session_updated', { session: this.serverlessSession });
+        this.broadcastSession(this.serverlessSession!);
+      }, 100);
+    }
   }
 
   public updateRoomSettings(roomCode: string, settings: Partial<GameSettings>) {

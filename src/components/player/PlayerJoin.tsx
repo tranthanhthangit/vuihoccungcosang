@@ -83,34 +83,40 @@ export const PlayerJoin: React.FC<PlayerJoinProps> = ({
   // Check room session validity with automatic retry for smooth QR scan discovery
   const checkSession = (codeToCheck: string, retryCount = 0) => {
     const cleanCode = codeToCheck.trim().toUpperCase();
-    if (cleanCode.length === 5) {
-      if (retryCount === 0 && !sessionData) setFetchingSession(true);
-      if (retryCount === 0) setFetchError(null);
-      fetch(`/api/session/${encodeURIComponent(cleanCode)}`, { cache: 'no-store' })
-        .then(async res => {
-          if (!res.ok) {
-            if (retryCount < 2) {
-              await new Promise(r => setTimeout(r, 600));
-              return checkSession(codeToCheck, retryCount + 1);
+    if (cleanCode.length >= 4 && cleanCode.length <= 6) {
+      if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+        if (retryCount === 0 && !sessionData) setFetchingSession(true);
+        if (retryCount === 0) setFetchError(null);
+        fetch(`/api/session/${encodeURIComponent(cleanCode)}`, { cache: 'no-store' })
+          .then(async res => {
+            if (!res.ok) {
+              if (retryCount < 2) {
+                await new Promise(r => setTimeout(r, 600));
+                return checkSession(codeToCheck, retryCount + 1);
+              }
+              throw new Error('Không tìm thấy phòng chơi này.');
             }
-            throw new Error('Không tìm thấy phòng chơi này.');
-          }
-          return res.json();
-        })
-        .then(data => {
-          if (data && data.session) {
-            setSessionData(data.session);
+            return res.json();
+          })
+          .then(data => {
+            if (data && data.session) {
+              setSessionData(data.session);
+              setFetchingSession(false);
+              setFetchError(null);
+            }
+          })
+          .catch(err => {
+            if (retryCount >= 2) {
+              setFetchError(err.message || 'Lỗi kết nối phòng');
+              setSessionData(null);
+            }
             setFetchingSession(false);
-            setFetchError(null);
-          }
-        })
-        .catch(err => {
-          if (retryCount >= 2) {
-            setFetchError(err.message || 'Lỗi kết nối phòng');
-            setSessionData(null);
-          }
-          setFetchingSession(false);
-        });
+          });
+      } else {
+        // In Serverless mode (Cloudflare / remote production):
+        // Query room info directly via realtime channel watchRoom / sync_request
+        realtime.watchRoom(cleanCode, deviceId);
+      }
     } else {
       setSessionData(null);
       setFetchError(null);
@@ -120,12 +126,12 @@ export const PlayerJoin: React.FC<PlayerJoinProps> = ({
   // Real-time synchronization: subscribe to room WebSocket events & poll fallback
   useEffect(() => {
     const cleanCode = roomCode.trim().toUpperCase();
-    if (cleanCode.length !== 5) {
+    if (cleanCode.length < 4 || cleanCode.length > 6) {
       setSessionData(null);
       return;
     }
 
-    // 1. Initial HTTP check
+    // 1. Initial check
     checkSession(cleanCode);
 
     // 2. Register socket as watcher in this room so server broadcasts live team additions
@@ -169,24 +175,27 @@ export const PlayerJoin: React.FC<PlayerJoinProps> = ({
       }
     });
 
-    // 4. Fallback interval polling every 1.5s to ensure zero desync
-    const pollInterval = setInterval(() => {
-      fetch(`/api/session/${encodeURIComponent(cleanCode)}`, { cache: 'no-store' })
-        .then(res => res.ok ? res.json() : null)
-        .then(data => {
-          if (data?.session) {
-            setSessionData(data.session);
-          }
-        })
-        .catch(() => {});
-    }, 1500);
+    // 4. Fallback interval polling for local server only
+    let pollInterval: any = null;
+    if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      pollInterval = setInterval(() => {
+        fetch(`/api/session/${encodeURIComponent(cleanCode)}`, { cache: 'no-store' })
+          .then(res => res.ok ? res.json() : null)
+          .then(data => {
+            if (data?.session) {
+              setSessionData(data.session);
+            }
+          })
+          .catch(() => {});
+      }, 1500);
+    }
 
     return () => {
       unsubTeamsUpdated();
       unsubTeamJoined();
       unsubRoomSnapshot();
       unsubSessionUpdated();
-      clearInterval(pollInterval);
+      if (pollInterval) clearInterval(pollInterval);
     };
   }, [roomCode, deviceId]);
 
@@ -330,7 +339,7 @@ export const PlayerJoin: React.FC<PlayerJoinProps> = ({
                     <div className="relative">
                       <input
                         type="text"
-                        maxLength={5}
+                        maxLength={6}
                         value={roomCode}
                         onChange={(e) => setRoomCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
                         onKeyDown={(e) => {
@@ -338,7 +347,7 @@ export const PlayerJoin: React.FC<PlayerJoinProps> = ({
                             handleConfirmJoin();
                           }
                         }}
-                        placeholder="VD: A8K92"
+                        placeholder="VD: 1547"
                         className="w-full py-2 px-3 text-center font-mono font-black text-xl sm:text-2xl tracking-widest text-slate-900 bg-white rounded-xl border-2 border-slate-300 focus:border-amber-400 outline-none uppercase shadow-inner"
                       />
                       {fetchingSession && (
