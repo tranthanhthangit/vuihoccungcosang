@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Lock, Mail, User, Eye, EyeOff, Sparkles, CheckCircle, AlertCircle, ExternalLink, Cloud } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { sounds } from '../../utils/sound';
@@ -19,7 +20,7 @@ export const TeacherAuthModal: React.FC<TeacherAuthModalProps> = ({ isOpen, onCl
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  if (!isOpen) return null;
+  if (!isOpen || typeof document === 'undefined') return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,11 +81,11 @@ export const TeacherAuthModal: React.FC<TeacherAuthModalProps> = ({ isOpen, onCl
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border-2 border-indigo-100 overflow-hidden flex flex-col relative animate-in zoom-in-95 duration-200">
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">
+      <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border-2 border-indigo-100 overflow-hidden flex flex-col relative my-auto animate-in zoom-in-95 duration-200 max-h-[92vh]">
         {/* Header decoration banner */}
-        <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 p-5 text-white relative">
+        <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 p-5 text-white relative shrink-0">
           <button
             onClick={() => {
               sounds.playClick();
@@ -111,7 +112,7 @@ export const TeacherAuthModal: React.FC<TeacherAuthModalProps> = ({ isOpen, onCl
         </div>
 
         {/* Content Body */}
-        <div className="p-6">
+        <div className="p-5 sm:p-6 overflow-y-auto">
           {!isConfigured ? (
             <div className="space-y-4">
               <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-4 text-amber-900 space-y-2">
@@ -333,6 +334,7 @@ export const TeacherAuthModal: React.FC<TeacherAuthModalProps> = ({ isOpen, onCl
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
