@@ -338,6 +338,7 @@ export class RealtimeClient {
         online: true,
         score: 0,
         lastSeen: Date.now(),
+        assignedSet: this.serverlessSession.teamAssignments?.[teamId] || 'A',
       };
 
       this.serverlessSession.teams[teamId] = team;
@@ -373,12 +374,17 @@ export class RealtimeClient {
       const { teamId } = payload;
       if (teamId && this.serverlessSession.teams[teamId]) {
         this.serverlessSession.teams[teamId].online = false;
+        this.persistServerlessSession();
         this.broadcastSession(this.serverlessSession);
         this.emit('team_presence_changed', { teamId, online: false });
       }
     } else if (type === 'player:submit_answer') {
-      const { teamId, questionIndex, answerId, answerIds } = payload;
-      const question = this.serverlessSession.game.questions[questionIndex];
+      const { teamId, questionIndex, answerId, answerIds, chosenLetter, htmlGameResult, openEnded } = payload;
+      const assigned = this.serverlessSession.teams[teamId]?.assignedSet || this.serverlessSession.teamAssignments?.[teamId] || 'A';
+      const question = (this.serverlessSession.isDualMode && assigned === 'B' && this.serverlessSession.gameB)
+        ? this.serverlessSession.gameB.questions[questionIndex]
+        : this.serverlessSession.game.questions[questionIndex];
+
       let isCorrect = false;
       let pointsAwarded = 0;
 
@@ -391,6 +397,18 @@ export class RealtimeClient {
           const correctIds = question.options?.filter(o => o.isCorrect).map(o => o.id) || [];
           isCorrect = correctIds.length === answerIds.length && correctIds.every(id => answerIds.includes(id));
           pointsAwarded = isCorrect ? (question.points || 10) : 0;
+        } else if (question.type === 'word_drag_drop' && chosenLetter) {
+          isCorrect = Boolean(chosenLetter && question.title?.toLowerCase().includes(chosenLetter.toLowerCase()));
+          pointsAwarded = isCorrect ? (question.points || 10) : 0;
+        } else if (htmlGameResult) {
+          const maxPoints = question.points || 30;
+          if (htmlGameResult.score !== undefined) {
+            pointsAwarded = Math.round(htmlGameResult.score);
+            isCorrect = Boolean(htmlGameResult.isCorrect ?? (pointsAwarded > 0));
+          } else {
+            isCorrect = Boolean(htmlGameResult.isCorrect);
+            pointsAwarded = isCorrect ? maxPoints : 0;
+          }
         } else {
           isCorrect = true;
           pointsAwarded = question.points || 10;
@@ -411,14 +429,17 @@ export class RealtimeClient {
         teamName: team?.teamName || teamId,
         answerId: answerId || '',
         answerIds: answerIds || [],
-        answerText: '',
+        answerText: openEnded?.textAnswer || '',
         submittedAt: Date.now(),
         responseTimeMs: Date.now() - (this.serverlessSession.questionStartTime || Date.now()),
         isCorrect,
         pointsAwarded,
+        assignedSet: assigned,
+        openEnded,
       };
 
       this.serverlessSession.answers[questionIndex] = qAns;
+      this.persistServerlessSession();
 
       const answeredTeams: Record<string, any> = {};
       Object.keys(qAns).forEach(tId => {
@@ -447,6 +468,7 @@ export class RealtimeClient {
         hasDrawn,
         updatedAt: Date.now(),
       };
+      this.persistServerlessSession();
 
       this.broadcast({
         type: 'draft_updated',
@@ -462,6 +484,97 @@ export class RealtimeClient {
         teamId,
         draft: this.serverlessSession.drafts[questionIndex][teamId],
       });
+    } else if (type === 'host:start_question') {
+      const qIndex = Number(payload.questionIndex ?? 0);
+      this.serverlessSession.status = 'playing';
+      this.serverlessSession.questionStatus = 'active';
+      this.serverlessSession.currentQuestionIndex = qIndex;
+      this.serverlessSession.questionStartTime = Date.now();
+      if (!this.serverlessSession.startedAt) {
+        this.serverlessSession.startedAt = Date.now();
+      }
+      if (!this.serverlessSession.answers[qIndex]) {
+        this.serverlessSession.answers[qIndex] = {};
+      }
+      this.persistServerlessSession();
+      this.broadcastSession(this.serverlessSession);
+      this.emit('session_updated', { session: this.serverlessSession });
+    } else if (type === 'host:next_question') {
+      const maxQuestions = this.serverlessSession.isDualMode
+        ? Math.max(this.serverlessSession.game.questions.length, this.serverlessSession.gameB?.questions?.length || 0)
+        : this.serverlessSession.game.questions.length;
+      const nextIndex = this.serverlessSession.currentQuestionIndex + 1;
+      if (nextIndex >= maxQuestions) {
+        this.serverlessSession.status = 'ended';
+        this.serverlessSession.endedAt = Date.now();
+        this.serverlessSession.questionStatus = 'results';
+        this.persistServerlessSession();
+        this.broadcastSession(this.serverlessSession);
+        this.broadcast({
+          type: 'game_ended',
+          data: { session: this.serverlessSession },
+        });
+        this.emit('session_updated', { session: this.serverlessSession });
+        this.emit('game_ended', { session: this.serverlessSession });
+      } else {
+        this.serverlessSession.status = 'playing';
+        this.serverlessSession.currentQuestionIndex = nextIndex;
+        this.serverlessSession.questionStatus = 'active';
+        this.serverlessSession.questionStartTime = Date.now();
+        if (!this.serverlessSession.answers[nextIndex]) {
+          this.serverlessSession.answers[nextIndex] = {};
+        }
+        this.persistServerlessSession();
+        this.broadcastSession(this.serverlessSession);
+        this.emit('session_updated', { session: this.serverlessSession });
+      }
+    } else if (type === 'host:end_question') {
+      this.serverlessSession.status = 'playing';
+      this.serverlessSession.questionStatus = 'results';
+      this.persistServerlessSession();
+      this.broadcastSession(this.serverlessSession);
+      this.emit('session_updated', { session: this.serverlessSession });
+    } else if (type === 'host:show_leaderboard') {
+      this.serverlessSession.status = 'playing';
+      this.serverlessSession.questionStatus = 'leaderboard';
+      this.persistServerlessSession();
+      this.broadcastSession(this.serverlessSession);
+      this.emit('session_updated', { session: this.serverlessSession });
+    } else if (type === 'host:restart_game') {
+      this.serverlessSession.status = 'lobby';
+      this.serverlessSession.currentQuestionIndex = 0;
+      this.serverlessSession.questionStatus = 'waiting';
+      this.serverlessSession.answers = {};
+      this.serverlessSession.questionStartTime = null;
+      this.serverlessSession.startedAt = null;
+      this.serverlessSession.endedAt = null;
+      Object.values(this.serverlessSession.teams).forEach(t => {
+        t.score = 0;
+      });
+      this.persistServerlessSession();
+      this.broadcastSession(this.serverlessSession);
+      this.emit('session_updated', { session: this.serverlessSession });
+    } else if (type === 'host:end_game') {
+      this.serverlessSession.status = 'ended';
+      this.serverlessSession.endedAt = Date.now();
+      this.persistServerlessSession();
+      this.broadcastSession(this.serverlessSession);
+      this.broadcast({
+        type: 'game_ended',
+        data: { session: this.serverlessSession },
+      });
+      this.emit('session_updated', { session: this.serverlessSession });
+      this.emit('game_ended', { session: this.serverlessSession });
+    } else if (type === 'host:assign_team_set') {
+      const { teamId, set } = payload;
+      if (this.serverlessSession.teams[teamId]) {
+        this.serverlessSession.teams[teamId].assignedSet = set;
+        if (!this.serverlessSession.teamAssignments) this.serverlessSession.teamAssignments = {};
+        this.serverlessSession.teamAssignments[teamId] = set;
+        this.persistServerlessSession();
+        this.broadcastSession(this.serverlessSession);
+        this.emit('session_updated', { session: this.serverlessSession });
+      }
     }
   }
 
@@ -841,11 +954,31 @@ export class RealtimeClient {
     });
   }
 
+  public setServerlessSession(session: SessionState) {
+    this.serverlessSession = session;
+    this.persistServerlessSession();
+  }
+
   public startQuestion(roomCode: string, questionIndex: number) {
+    if (!this.serverlessSession && typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(`vuihoc_active_session_${roomCode.toUpperCase()}`);
+        if (saved) this.serverlessSession = JSON.parse(saved);
+      } catch {}
+    }
+
     if (this.serverlessSession) {
+      this.serverlessSession.status = 'playing';
       this.serverlessSession.questionStatus = 'active';
       this.serverlessSession.currentQuestionIndex = questionIndex;
       this.serverlessSession.questionStartTime = Date.now();
+      if (!this.serverlessSession.startedAt) {
+        this.serverlessSession.startedAt = Date.now();
+      }
+      if (!this.serverlessSession.answers[questionIndex]) {
+        this.serverlessSession.answers[questionIndex] = {};
+      }
+      this.persistServerlessSession();
       this.broadcastSession(this.serverlessSession);
       this.emit('session_updated', { session: this.serverlessSession });
     }
@@ -895,7 +1028,33 @@ export class RealtimeClient {
 
   public endQuestion(roomCode: string) {
     if (this.serverlessSession) {
+      this.serverlessSession.status = 'playing';
       this.serverlessSession.questionStatus = 'results';
+      const qIdx = this.serverlessSession.currentQuestionIndex;
+      if (!this.serverlessSession.answers[qIdx]) {
+        this.serverlessSession.answers[qIdx] = {};
+      }
+      // Fill timeouts for any teams that didn't submit
+      Object.keys(this.serverlessSession.teams).forEach(teamId => {
+        if (!this.serverlessSession!.answers[qIdx][teamId]) {
+          const team = this.serverlessSession!.teams[teamId];
+          const question = this.serverlessSession!.game.questions[qIdx];
+          this.serverlessSession!.answers[qIdx][teamId] = {
+            sessionId: this.serverlessSession!.sessionId,
+            questionIndex: qIdx,
+            questionId: question?.id || '',
+            teamId,
+            teamName: team?.teamName || teamId,
+            answerId: 'timeout',
+            answerText: 'Hết giờ (chưa trả lời)',
+            submittedAt: Date.now(),
+            responseTimeMs: 0,
+            isCorrect: false,
+            pointsAwarded: 0,
+          };
+        }
+      });
+      this.persistServerlessSession();
       this.broadcastSession(this.serverlessSession);
       this.emit('session_updated', { session: this.serverlessSession });
     }
@@ -908,11 +1067,35 @@ export class RealtimeClient {
 
   public nextQuestion(roomCode: string) {
     if (this.serverlessSession) {
-      this.serverlessSession.currentQuestionIndex++;
-      this.serverlessSession.questionStatus = 'waiting';
-      this.serverlessSession.questionStartTime = null;
-      this.broadcastSession(this.serverlessSession);
-      this.emit('session_updated', { session: this.serverlessSession });
+      const maxQuestions = this.serverlessSession.isDualMode
+        ? Math.max(this.serverlessSession.game.questions.length, this.serverlessSession.gameB?.questions?.length || 0)
+        : this.serverlessSession.game.questions.length;
+      const nextIndex = this.serverlessSession.currentQuestionIndex + 1;
+
+      if (nextIndex >= maxQuestions) {
+        this.serverlessSession.status = 'ended';
+        this.serverlessSession.endedAt = Date.now();
+        this.serverlessSession.questionStatus = 'results';
+        this.persistServerlessSession();
+        this.broadcastSession(this.serverlessSession);
+        this.broadcast({
+          type: 'game_ended',
+          data: { session: this.serverlessSession },
+        });
+        this.emit('session_updated', { session: this.serverlessSession });
+        this.emit('game_ended', { session: this.serverlessSession });
+      } else {
+        this.serverlessSession.status = 'playing';
+        this.serverlessSession.currentQuestionIndex = nextIndex;
+        this.serverlessSession.questionStatus = 'active';
+        this.serverlessSession.questionStartTime = Date.now();
+        if (!this.serverlessSession.answers[nextIndex]) {
+          this.serverlessSession.answers[nextIndex] = {};
+        }
+        this.persistServerlessSession();
+        this.broadcastSession(this.serverlessSession);
+        this.emit('session_updated', { session: this.serverlessSession });
+      }
     }
 
     this.send({
@@ -923,7 +1106,9 @@ export class RealtimeClient {
 
   public showLeaderboard(roomCode: string) {
     if (this.serverlessSession) {
-      this.serverlessSession.questionStatus = 'results';
+      this.serverlessSession.status = 'playing';
+      this.serverlessSession.questionStatus = 'leaderboard';
+      this.persistServerlessSession();
       this.broadcastSession(this.serverlessSession);
       this.emit('session_updated', { session: this.serverlessSession });
     }
@@ -938,6 +1123,7 @@ export class RealtimeClient {
     if (this.serverlessSession) {
       this.serverlessSession.status = 'ended';
       this.serverlessSession.endedAt = Date.now();
+      this.persistServerlessSession();
       this.broadcastSession(this.serverlessSession);
       this.broadcast({
         type: 'game_ended',
@@ -960,6 +1146,12 @@ export class RealtimeClient {
       this.serverlessSession.questionStatus = 'waiting';
       this.serverlessSession.answers = {};
       this.serverlessSession.questionStartTime = null;
+      this.serverlessSession.startedAt = null;
+      this.serverlessSession.endedAt = null;
+      Object.values(this.serverlessSession.teams).forEach(t => {
+        t.score = 0;
+      });
+      this.persistServerlessSession();
       this.broadcastSession(this.serverlessSession);
       this.emit('session_updated', { session: this.serverlessSession });
     }

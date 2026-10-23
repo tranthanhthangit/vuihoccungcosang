@@ -69,6 +69,7 @@ export const HostPage: React.FC<HostPageProps> = ({
     // Listen to session creation
     const unsubCreated = realtime.on('session_created', (data: any) => {
       setSession(data.session);
+      realtime.setServerlessSession(data.session);
       setLoading(false);
       setError(null);
       if (typeof window !== 'undefined') {
@@ -80,6 +81,7 @@ export const HostPage: React.FC<HostPageProps> = ({
     // Listen to full authoritative updates
     const unsubUpdated = realtime.on('session_updated', (data: any) => {
       setSession(data.session);
+      realtime.setServerlessSession(data.session);
       setLoading(false);
       setError(null);
       if (typeof window !== 'undefined' && data.session?.roomCode) {
@@ -238,13 +240,43 @@ export const HostPage: React.FC<HostPageProps> = ({
 
   const proceedStartQuestion0 = useCallback(() => {
     if (!session) return;
+    setSession(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        status: 'playing',
+        questionStatus: 'active',
+        currentQuestionIndex: 0,
+        questionStartTime: Date.now(),
+        startedAt: prev.startedAt || Date.now(),
+        answers: prev.answers ? { ...prev.answers, [0]: prev.answers[0] || {} } : { [0]: {} },
+      };
+    });
     realtime.startQuestion(session.roomCode, 0);
-  }, [session?.roomCode]);
+  }, [session]);
 
   const proceedNextQuestion = useCallback(() => {
     if (!session) return;
+    setSession(prev => {
+      if (!prev) return prev;
+      const maxQ = prev.isDualMode
+        ? Math.max(prev.game.questions.length, prev.gameB?.questions?.length || 0)
+        : prev.game.questions.length;
+      const nextIdx = prev.currentQuestionIndex + 1;
+      if (nextIdx >= maxQ) {
+        return { ...prev, status: 'ended', questionStatus: 'results', endedAt: Date.now() };
+      }
+      return {
+        ...prev,
+        status: 'playing',
+        questionStatus: 'active',
+        currentQuestionIndex: nextIdx,
+        questionStartTime: Date.now(),
+        answers: prev.answers ? { ...prev.answers, [nextIdx]: prev.answers[nextIdx] || {} } : { [nextIdx]: {} },
+      };
+    });
     realtime.nextQuestion(session.roomCode);
-  }, [session?.roomCode]);
+  }, [session]);
 
   const handleStartGame = useCallback(() => {
     if (!session) return;
@@ -266,8 +298,9 @@ export const HostPage: React.FC<HostPageProps> = ({
 
   const handleEndQuestion = useCallback(() => {
     if (!session) return;
+    setSession(prev => prev ? { ...prev, questionStatus: 'results' } : prev);
     realtime.endQuestion(session.roomCode);
-  }, [session?.roomCode]);
+  }, [session]);
 
   const handleNextQuestion = useCallback(() => {
     if (!session) return;
@@ -289,18 +322,30 @@ export const HostPage: React.FC<HostPageProps> = ({
 
   const handleShowLeaderboard = useCallback(() => {
     if (!session) return;
+    setSession(prev => prev ? { ...prev, questionStatus: 'leaderboard' } : prev);
     realtime.showLeaderboard(session.roomCode);
-  }, [session?.roomCode]);
+  }, [session]);
 
   const handleContinueFromLeaderboard = useCallback(() => {
     if (!session) return;
+    setSession(prev => prev ? { ...prev, questionStatus: 'results' } : prev);
     realtime.endQuestion(session.roomCode);
-  }, [session?.roomCode]);
+  }, [session]);
 
   const handleReplayGame = useCallback(() => {
     if (!session) return;
+    setSession(prev => prev ? {
+      ...prev,
+      status: 'lobby',
+      currentQuestionIndex: 0,
+      questionStatus: 'waiting',
+      answers: {},
+      questionStartTime: null,
+      startedAt: null,
+      endedAt: null,
+    } : prev);
     realtime.restartGame(session.roomCode);
-  }, [session?.roomCode]);
+  }, [session]);
 
   const handleCleanExit = () => {
     if (session) {

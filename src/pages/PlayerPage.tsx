@@ -331,7 +331,9 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
   }
 
   const currentQIndex = session.currentQuestionIndex;
-  const currentQ = session.game.questions[currentQIndex];
+  const myAssignedSet = session.myAssignedSet || joinedTeam.assignedSet || session.teamAssignments?.[joinedTeam.teamId] || 'A';
+  const effectiveGame = (session.isDualMode && myAssignedSet === 'B' && session.gameB) ? session.gameB : session.game;
+  const currentQ = effectiveGame.questions[currentQIndex];
   const myAnswer: TeamAnswer | undefined = session.answers[currentQIndex]?.[joinedTeam.teamId];
 
   const isNoLimitQ = true;
@@ -346,8 +348,8 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
           roomCode={session.roomCode}
           isConnected={isConnected}
           isDualMode={session.isDualMode}
-          myAssignedSet={session.myAssignedSet || joinedTeam.assignedSet}
-          assignedSetTitle={session.assignedSetTitle}
+          myAssignedSet={myAssignedSet}
+          assignedSetTitle={session.assignedSetTitle || effectiveGame.title}
         />
       )}
 
@@ -355,7 +357,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
       {session.isDualMode && session.status === 'playing' && (
         <div className="bg-white/95 backdrop-blur-md border-b border-indigo-100 py-1.5 px-3 text-center shadow-2xs flex items-center justify-center gap-1.5 shrink-0">
           <span className="text-[11px] font-black text-indigo-800">
-            🎯 {session.myAssignedSet === 'B' ? 'Bộ câu hỏi 2' : 'Bộ câu hỏi 1'}: {session.assignedSetTitle || session.game.title}
+            🎯 {myAssignedSet === 'B' ? 'Bộ câu hỏi 2' : 'Bộ câu hỏi 1'}: {session.assignedSetTitle || effectiveGame.title}
           </span>
         </div>
       )}
@@ -366,16 +368,16 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
           currentQ.type === 'html_game' ||
           Boolean(currentQ.htmlContent) ||
           Boolean(currentQ.gameUrl) ||
-          Boolean(session.game.gameUrl) ||
-          session.game.gameType === 'html_game' ||
-          Boolean(session.game.isZipArchive)
+          Boolean(effectiveGame.gameUrl) ||
+          effectiveGame.gameType === 'html_game' ||
+          Boolean(effectiveGame.isZipArchive)
         ) ? (
           <PlayerHtmlQuestion
             key={`q_html_${currentQIndex}`}
             question={currentQ}
-            gameUrl={currentQ.gameUrl || session.game.gameUrl}
+            gameUrl={currentQ.gameUrl || effectiveGame.gameUrl}
             questionIndex={currentQIndex}
-            totalQuestions={session.game.questions.length}
+            totalQuestions={effectiveGame.questions.length}
             startTime={session.questionStartTime}
             timeLimit={effectiveTimeLimit}
             existingAnswer={myAnswer}
@@ -387,7 +389,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
               key={`q_word_${currentQIndex}`}
               question={{ ...currentQ, noTimeLimit: isNoLimitQ }}
               questionIndex={currentQIndex}
-              totalQuestions={session.game.questions.length}
+              totalQuestions={effectiveGame.questions.length}
               startTime={session.questionStartTime}
               timeLimit={effectiveTimeLimit}
               existingAnswer={myAnswer}
@@ -399,7 +401,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
             key={`q_drag_${currentQIndex}`}
             question={{ ...currentQ, noTimeLimit: isNoLimitQ }}
             questionIndex={currentQIndex}
-            totalQuestions={session.game.questions.length}
+            totalQuestions={effectiveGame.questions.length}
             startTime={session.questionStartTime}
             timeLimit={effectiveTimeLimit}
             existingAnswer={myAnswer}
@@ -411,7 +413,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
               key={`q_open_${currentQIndex}`}
               question={{ ...currentQ, noTimeLimit: true }}
               questionIndex={currentQIndex}
-              totalQuestions={session.game.questions.length}
+              totalQuestions={effectiveGame.questions.length}
               startTime={session.questionStartTime}
               timeLimit={0}
               roomCode={session.roomCode}
@@ -426,7 +428,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
               key={`q_choice_${currentQIndex}`}
               question={{ ...currentQ, noTimeLimit: isNoLimitQ }}
               questionIndex={currentQIndex}
-              totalQuestions={session.game.questions.length}
+              totalQuestions={effectiveGame.questions.length}
               startTime={session.questionStartTime}
               timeLimit={effectiveTimeLimit}
               existingAnswer={myAnswer}
@@ -443,14 +445,14 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
             key={`res_${currentQIndex}`}
             question={currentQ}
             questionIndex={currentQIndex}
-            totalQuestions={session.game.questions.length}
+            totalQuestions={effectiveGame.questions.length}
             answer={myAnswer}
           />
         </div>
       )}
 
       {/* Screen 3.5: All Questions in Question Set Completed while game is still playing */}
-      {session.status === 'playing' && (!currentQ || currentQIndex >= session.game.questions.length) && (
+      {session.status === 'playing' && (!currentQ || currentQIndex >= effectiveGame.questions.length) && (
         <PlayerQuestionsCompleted
           team={joinedTeam}
           session={session}

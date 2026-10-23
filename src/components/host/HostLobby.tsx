@@ -69,8 +69,14 @@ export const HostLobby: React.FC<HostLobbyProps> = ({
   // Fetch network info from server (auto-detects local network IP addresses and public appUrl)
   useEffect(() => {
     fetch('/api/network-info', { cache: 'no-store' })
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) return null;
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) return null;
+        return res.json();
+      })
       .then(data => {
+        if (!data) return;
         const detectedUrl = data.requestOrigin || data.appUrl || '';
         if (detectedUrl && typeof detectedUrl === 'string') {
           setServerAppUrl(detectedUrl.trim().replace(/\/$/, ''));
@@ -79,8 +85,8 @@ export const HostLobby: React.FC<HostLobbyProps> = ({
           setLocalIps(data.localIps);
         }
       })
-      .catch(err => {
-        console.warn('Network info query fallback:', err);
+      .catch(() => {
+        // Silently ignore in serverless environments (e.g. Cloudflare Pages)
       });
   }, []);
 
