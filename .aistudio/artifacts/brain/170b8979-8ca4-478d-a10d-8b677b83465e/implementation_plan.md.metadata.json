@@ -1,0 +1,6 @@
+{
+  "summary":  "Cập nhật kế hoạch triển khai: Chỉ khi một đội chuyển sang trạng thái offline hoàn toàn mới được tính là bị văng khỏi phòng và được phép chọn lại đội đó để tiếp tục chơi; không khóa màn hình chọn đội khi trò chơi đã bắt đầu.",
+  "updatedAt":  "2026-10-22T17:56:58.860893950Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}
