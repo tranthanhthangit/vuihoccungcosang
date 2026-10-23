@@ -1,8 +1,23 @@
-import { Game, GameSettings, SessionState } from '../types/game';
+import { Game, GameSettings, SessionState, ConnectedTeam, TeamPreset } from '../types/game';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from './supabase';
 
 type EventCallback = (data: any) => void;
+
+export const DEFAULT_TEAM_PRESETS: TeamPreset[] = [
+  { id: 'team_sun', name: 'máy 1', icon: '☀️', colorName: 'Đỏ Mặt Trời', bgColor: 'bg-rose-500', textColor: 'text-rose-600', borderColor: 'border-rose-400', ringColor: 'ring-rose-400' },
+  { id: 'team_rainbow', name: 'máy 2', icon: '🌈', colorName: 'Xanh Lam', bgColor: 'bg-sky-500', textColor: 'text-sky-600', borderColor: 'border-sky-400', ringColor: 'ring-sky-400' },
+  { id: 'team_flower', name: 'máy 3', icon: '🌸', colorName: 'Hồng Phấn', bgColor: 'bg-pink-500', textColor: 'text-pink-600', borderColor: 'border-pink-400', ringColor: 'ring-pink-400' },
+  { id: 'team_leaf', name: 'máy 4', icon: '🍃', colorName: 'Xanh Lá', bgColor: 'bg-emerald-500', textColor: 'text-emerald-600', borderColor: 'border-emerald-400', ringColor: 'ring-emerald-400' },
+  { id: 'team_star', name: 'máy 5', icon: '⭐', colorName: 'Vàng Sao', bgColor: 'bg-amber-500', textColor: 'text-amber-600', borderColor: 'border-amber-400', ringColor: 'ring-amber-400' },
+  { id: 'team_cloud', name: 'máy 6', icon: '☁️', colorName: 'Xanh Lơ', bgColor: 'bg-cyan-500', textColor: 'text-cyan-600', borderColor: 'border-cyan-400', ringColor: 'ring-cyan-400' },
+  { id: 'team_elephant', name: 'máy 7', icon: '🐘', colorName: 'Tím Biếc', bgColor: 'bg-purple-500', textColor: 'text-purple-600', borderColor: 'border-purple-400', ringColor: 'ring-purple-400' },
+  { id: 'team_rabbit', name: 'máy 8', icon: '🐰', colorName: 'Cam Cà Rốt', bgColor: 'bg-orange-500', textColor: 'text-orange-600', borderColor: 'border-orange-400', ringColor: 'ring-orange-400' },
+  { id: 'team_lion', name: 'máy 9', icon: '🦁', colorName: 'Vàng Hổ Phách', bgColor: 'bg-amber-600', textColor: 'text-amber-700', borderColor: 'border-amber-500', ringColor: 'ring-amber-500' },
+  { id: 'team_dolphin', name: 'máy 10', icon: '🐬', colorName: 'Xanh Đại Dương', bgColor: 'bg-blue-600', textColor: 'text-blue-700', borderColor: 'border-blue-500', ringColor: 'ring-blue-500' },
+  { id: 'team_chick', name: 'máy 11', icon: '🐥', colorName: 'Xanh Lá Non', bgColor: 'bg-lime-500', textColor: 'text-lime-700', borderColor: 'border-lime-400', ringColor: 'ring-lime-400' },
+  { id: 'team_strawberry', name: 'máy 12', icon: '🍓', colorName: 'Đỏ Ruby', bgColor: 'bg-red-500', textColor: 'text-red-600', borderColor: 'border-red-400', ringColor: 'ring-red-400' },
+];
 
 export class RealtimeClient {
   private ws: WebSocket | null = null;
@@ -15,19 +30,39 @@ export class RealtimeClient {
   private currentTeamId: string | null = null;
   private currentDeviceId: string | null = null;
   private pendingQueue: string[] = [];
-  private serverTimeOffset: number = 0; // Point 2: server time clock skew correction
+  private serverTimeOffset: number = 0;
+
+  // Serverless in-memory coordinator state when running on Cloudflare without a Node.js server
+  private serverlessSession: SessionState | null = null;
 
   constructor() {
     this.initNetworkListeners();
-    this.connect();
+    if (this.shouldConnectLocalWs()) {
+      this.connect();
+    } else {
+      // Running on Cloudflare Pages/Workers or remote production
+      // Connection status relies on Supabase Realtime channel status
+      this.isConnected = isSupabaseConfigured();
+    }
   }
 
+  private shouldConnectLocalWs(): boolean {
+    if (typeof window === 'undefined') return false;
+    const hostname = window.location.hostname;
+    // ONLY connect to local ws on localhost / 127.0.0.1
+    // Never attempt /ws on Cloudflare (*.workers.dev, *.pages.dev) where no Node server exists
+    return hostname === 'localhost' || hostname === '127.0.0.1';
+  }
 
   private initNetworkListeners() {
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
-        this.connect();
-        this.emit('connection_change', { status: 'reconnecting', online: true });
+        if (this.shouldConnectLocalWs()) {
+          this.connect();
+        } else if (isSupabaseConfigured()) {
+          this.isConnected = true;
+          this.emit('connection_change', { status: 'connected', online: true });
+        }
       });
 
       window.addEventListener('offline', () => {
@@ -45,6 +80,11 @@ export class RealtimeClient {
 
   public connect() {
     if (typeof window === 'undefined') return;
+    if (!this.shouldConnectLocalWs()) {
+      this.isConnected = isSupabaseConfigured();
+      return;
+    }
+
     if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
       return;
     }
@@ -57,7 +97,6 @@ export class RealtimeClient {
         this.isConnected = true;
         this.emit('connection_change', { status: 'connected', online: true });
 
-        // Point 9 & 10: Automatic synchronization upon reconnect
         if (this.currentRoomCode && this.currentRole) {
           this.send({
             type: 'sync_request',
@@ -68,7 +107,6 @@ export class RealtimeClient {
           });
         }
 
-        // Flush pending messages
         while (this.pendingQueue.length > 0) {
           const msg = this.pendingQueue.shift();
           if (msg && this.ws?.readyState === WebSocket.OPEN) {
@@ -80,8 +118,6 @@ export class RealtimeClient {
       this.ws.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data);
-
-          // Synchronize clock offset if server timestamp is present
           if (payload.serverTime) {
             this.serverTimeOffset = payload.serverTime - Date.now();
           }
@@ -89,17 +125,10 @@ export class RealtimeClient {
           if (payload.type === 'session_created' && payload.data?.session?.roomCode) {
             this.currentRoomCode = payload.data.session.roomCode.toUpperCase();
             this.currentRole = 'host';
-            if (this.currentRoomCode) {
-              this.initSupabaseRoom(this.currentRoomCode, 'host');
-            }
           }
           if (payload.type === 'session_updated' && payload.data?.session?.roomCode && this.currentRole === 'host') {
             this.currentRoomCode = payload.data.session.roomCode.toUpperCase();
-            if (this.currentRoomCode) {
-              this.initSupabaseRoom(this.currentRoomCode, 'host');
-            }
           }
-
 
           if (payload.type) {
             this.emit(payload.type, payload.data ?? payload);
@@ -110,35 +139,47 @@ export class RealtimeClient {
       };
 
       this.ws.onclose = () => {
-        this.isConnected = false;
-        this.emit('connection_change', { status: 'disconnected', online: navigator.onLine });
-        this.scheduleReconnect();
+        this.isConnected = isSupabaseConfigured();
+        if (this.shouldConnectLocalWs()) {
+          this.emit('connection_change', { status: 'disconnected', online: navigator.onLine });
+          this.scheduleReconnect();
+        }
       };
 
       this.ws.onerror = (err) => {
-        console.warn('[RealtimeClient] WS error', err);
-        this.isConnected = false;
-        this.emit('connection_change', { status: 'error', online: navigator.onLine });
+        if (this.shouldConnectLocalWs()) {
+          console.warn('[RealtimeClient] WS error', err);
+          this.isConnected = false;
+          this.emit('connection_change', { status: 'error', online: navigator.onLine });
+        }
       };
     } catch (err) {
-      console.error('[RealtimeClient] Connection error', err);
-      this.scheduleReconnect();
+      if (this.shouldConnectLocalWs()) {
+        console.error('[RealtimeClient] Connection error', err);
+        this.scheduleReconnect();
+      }
     }
   }
 
   private scheduleReconnect() {
+    if (!this.shouldConnectLocalWs()) return;
     if (this.reconnectTimer) return;
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
-    }, 1500);
+    }, 2000);
   }
 
   /**
    * Initializes or subscribes to a Supabase Realtime Channel for serverless room communication
    */
   public initSupabaseRoom(roomCode: string, role: 'host' | 'player') {
-    if (!supabase || !isSupabaseConfigured() || !roomCode) return;
+    if (!supabase || !isSupabaseConfigured() || !roomCode) {
+      if (!this.shouldConnectLocalWs()) {
+        this.isConnected = true;
+      }
+      return;
+    }
 
     const channelName = `room:${roomCode.toUpperCase()}`;
     if (this.supabaseChannel && this.supabaseChannel.topic === `realtime:${channelName}`) {
@@ -161,13 +202,20 @@ export class RealtimeClient {
 
     this.supabaseChannel
       .on('broadcast', { event: '*' }, ({ event, payload }) => {
-        if (payload) {
-          if (payload.serverTime) {
-            this.serverTimeOffset = payload.serverTime - Date.now();
-          }
-          const eventType = payload.type || event;
-          this.emit(eventType, payload.data ?? payload);
+        if (!payload) return;
+        if (payload.serverTime) {
+          this.serverTimeOffset = payload.serverTime - Date.now();
         }
+
+        const eventType = payload.type || event;
+
+        // Serverless Host Coordinator: Process incoming player requests
+        if (this.currentRole === 'host' && this.serverlessSession) {
+          this.handleServerlessHostIncoming(eventType, payload);
+        }
+
+        // Emit locally for UI consumption
+        this.emit(eventType, payload.data ?? payload);
       })
       .on('presence', { event: 'sync' }, () => {
         const state = this.supabaseChannel?.presenceState() || {};
@@ -206,17 +254,164 @@ export class RealtimeClient {
       });
   }
 
-  public send(payload: object) {
-    const raw = JSON.stringify(payload);
-    // 1. Send via local WebSocket if connected
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(raw);
-    } else {
-      this.pendingQueue.push(raw);
-      this.connect();
-    }
+  /**
+   * Serverless Host Event Processor: Handles player actions when running without Node server
+   */
+  private handleServerlessHostIncoming(type: string, payload: any) {
+    if (!this.serverlessSession) return;
 
-    // 2. Broadcast through Supabase Realtime Channel if configured
+    if (type === 'player:join') {
+      const { teamId, customTeamName, deviceId } = payload;
+      const preset = DEFAULT_TEAM_PRESETS.find(p => p.id === teamId);
+      const teamNumber = (DEFAULT_TEAM_PRESETS.findIndex(p => p.id === teamId) + 1) || Object.keys(this.serverlessSession.teams).length + 1;
+
+      const team: ConnectedTeam = {
+        teamId,
+        teamNumber,
+        teamName: customTeamName?.trim() || preset?.name || `Đội ${teamNumber}`,
+        icon: preset?.icon || '⭐',
+        color: preset?.bgColor || 'bg-indigo-500',
+        deviceId: deviceId || '',
+        joinedAt: Date.now(),
+        online: true,
+        score: 0,
+        lastSeen: Date.now(),
+      };
+
+      this.serverlessSession.teams[teamId] = team;
+
+      // Broadcast join_success and session_updated to all players
+      this.broadcast({
+        type: 'join_success',
+        data: {
+          session: this.serverlessSession,
+          team,
+        },
+      });
+
+      this.broadcast({
+        type: 'team_joined',
+        data: {
+          team,
+          teams: this.serverlessSession.teams,
+        },
+      });
+
+      this.broadcastSession(this.serverlessSession);
+      this.emit('team_joined', { team, teams: this.serverlessSession.teams });
+      this.emit('session_updated', { session: this.serverlessSession });
+    } else if (type === 'sync_request') {
+      this.broadcastSession(this.serverlessSession);
+    } else if (type === 'player:heartbeat') {
+      const { teamId } = payload;
+      if (teamId && this.serverlessSession.teams[teamId]) {
+        this.serverlessSession.teams[teamId].online = true;
+        this.serverlessSession.teams[teamId].lastSeen = Date.now();
+      }
+    } else if (type === 'player:leave') {
+      const { teamId } = payload;
+      if (teamId && this.serverlessSession.teams[teamId]) {
+        this.serverlessSession.teams[teamId].online = false;
+        this.broadcastSession(this.serverlessSession);
+        this.emit('team_presence_changed', { teamId, online: false });
+      }
+    } else if (type === 'player:submit_answer') {
+      const { teamId, questionIndex, answerId, answerIds } = payload;
+      const question = this.serverlessSession.game.questions[questionIndex];
+      let isCorrect = false;
+      let pointsAwarded = 0;
+
+      if (question) {
+        if (question.type === 'multiple_choice' || question.type === 'true_false' || question.type === 'letter_recognition' || question.type === 'counting') {
+          const opt = question.options?.find(o => o.id === answerId);
+          isCorrect = Boolean(opt?.isCorrect);
+          pointsAwarded = isCorrect ? (question.points || 10) : 0;
+        } else if (question.type === 'word_choice' && answerIds) {
+          const correctIds = question.options?.filter(o => o.isCorrect).map(o => o.id) || [];
+          isCorrect = correctIds.length === answerIds.length && correctIds.every(id => answerIds.includes(id));
+          pointsAwarded = isCorrect ? (question.points || 10) : 0;
+        } else {
+          isCorrect = true;
+          pointsAwarded = question.points || 10;
+        }
+      }
+
+      const qAns = this.serverlessSession.answers[questionIndex] || {};
+      const team = this.serverlessSession.teams[teamId];
+      if (team) {
+        team.score = (team.score || 0) + pointsAwarded;
+      }
+
+      qAns[teamId] = {
+        sessionId: this.serverlessSession.sessionId,
+        questionIndex,
+        questionId: question?.id || '',
+        teamId,
+        teamName: team?.teamName || teamId,
+        answerId: answerId || '',
+        answerIds: answerIds || [],
+        answerText: '',
+        submittedAt: Date.now(),
+        responseTimeMs: Date.now() - (this.serverlessSession.questionStartTime || Date.now()),
+        isCorrect,
+        pointsAwarded,
+      };
+
+      this.serverlessSession.answers[questionIndex] = qAns;
+
+      const answeredTeams: Record<string, any> = {};
+      Object.keys(qAns).forEach(tId => {
+        answeredTeams[tId] = { submittedAt: qAns[tId].submittedAt };
+      });
+
+      this.broadcast({
+        type: 'answer_status_updated',
+        data: {
+          questionIndex,
+          answeredTeams,
+        },
+      });
+
+      this.emit('answer_status_updated', {
+        questionIndex,
+        answeredTeams,
+      });
+    } else if (type === 'player:save_open_ended_draft') {
+      const { teamId, questionIndex, textAnswer, drawingDataUrl, hasDrawn } = payload;
+      if (!this.serverlessSession.drafts) this.serverlessSession.drafts = {};
+      if (!this.serverlessSession.drafts[questionIndex]) this.serverlessSession.drafts[questionIndex] = {};
+      this.serverlessSession.drafts[questionIndex][teamId] = {
+        textAnswer,
+        drawingDataUrl,
+        hasDrawn,
+        updatedAt: Date.now(),
+      };
+
+      this.broadcast({
+        type: 'draft_updated',
+        data: {
+          questionIndex,
+          teamId,
+          draft: this.serverlessSession.drafts[questionIndex][teamId],
+        },
+      });
+
+      this.emit('draft_updated', {
+        questionIndex,
+        teamId,
+        draft: this.serverlessSession.drafts[questionIndex][teamId],
+      });
+    }
+  }
+
+  public broadcastSession(session: SessionState) {
+    this.broadcast({
+      type: 'session_updated',
+      data: { session },
+    });
+  }
+
+  public broadcast(payload: object) {
     if (this.supabaseChannel && isSupabaseConfigured()) {
       const eventName = (payload as any).type || 'message';
       this.supabaseChannel.send({
@@ -230,6 +425,22 @@ export class RealtimeClient {
     }
   }
 
+  public send(payload: object) {
+    const raw = JSON.stringify(payload);
+
+    // 1. Send via local WebSocket if running in local Node development environment
+    if (this.shouldConnectLocalWs()) {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(raw);
+      } else {
+        this.pendingQueue.push(raw);
+        this.connect();
+      }
+    }
+
+    // 2. Broadcast through Supabase Realtime Channel if configured
+    this.broadcast(payload);
+  }
 
   public on(event: string, callback: EventCallback) {
     if (!this.listeners.has(event)) {
@@ -259,12 +470,12 @@ export class RealtimeClient {
   }
 
   public getIsConnected(): boolean {
+    if (!this.shouldConnectLocalWs()) {
+      return isSupabaseConfigured() ? true : true; // In static mode, host acts as authority
+    }
     return this.isConnected;
   }
 
-  /**
-   * Point 2: Returns the authoritative current timestamp adjusted with server offset
-   */
   public getServerNow(): number {
     return Date.now() + this.serverTimeOffset;
   }
@@ -272,10 +483,14 @@ export class RealtimeClient {
   // High-level Actions
   public createSession(game: Game, settings?: GameSettings) {
     this.currentRole = 'host';
-    if ((!this.ws || this.ws.readyState !== WebSocket.OPEN) && isSupabaseConfigured()) {
+    const isLocalServerAvailable = this.ws && this.ws.readyState === WebSocket.OPEN;
+
+    if (!isLocalServerAvailable) {
+      // Serverless mode (Cloudflare + Supabase or local offline)
       const roomCode = Math.floor(1000 + Math.random() * 9000).toString();
       this.currentRoomCode = roomCode;
       this.initSupabaseRoom(roomCode, 'host');
+
       const initialSession: SessionState = {
         sessionId: `session_${Date.now()}_${roomCode}`,
         roomCode,
@@ -298,12 +513,13 @@ export class RealtimeClient {
         startedAt: null,
         endedAt: null,
       };
+
+      this.serverlessSession = initialSession;
+
       setTimeout(() => {
         this.emit('session_created', { session: initialSession });
-        this.send({
-          type: 'session_updated',
-          data: { session: initialSession },
-        });
+        this.emit('session_updated', { session: initialSession });
+        this.broadcastSession(initialSession);
       }, 50);
       return;
     }
@@ -317,10 +533,13 @@ export class RealtimeClient {
 
   public createDualSession(gameA: Game, gameB: Game, settings?: GameSettings) {
     this.currentRole = 'host';
-    if ((!this.ws || this.ws.readyState !== WebSocket.OPEN) && isSupabaseConfigured()) {
+    const isLocalServerAvailable = this.ws && this.ws.readyState === WebSocket.OPEN;
+
+    if (!isLocalServerAvailable) {
       const roomCode = Math.floor(1000 + Math.random() * 9000).toString();
       this.currentRoomCode = roomCode;
       this.initSupabaseRoom(roomCode, 'host');
+
       const initialSession: SessionState = {
         sessionId: `session_dual_${Date.now()}_${roomCode}`,
         roomCode,
@@ -347,12 +566,12 @@ export class RealtimeClient {
         endedAt: null,
       };
 
+      this.serverlessSession = initialSession;
+
       setTimeout(() => {
         this.emit('session_created', { session: initialSession });
-        this.send({
-          type: 'session_updated',
-          data: { session: initialSession },
-        });
+        this.emit('session_updated', { session: initialSession });
+        this.broadcastSession(initialSession);
       }, 50);
       return;
     }
@@ -366,8 +585,15 @@ export class RealtimeClient {
     });
   }
 
-
   public assignTeamSet(roomCode: string, teamId: string, set: 'A' | 'B') {
+    if (this.serverlessSession && this.serverlessSession.teams[teamId]) {
+      this.serverlessSession.teams[teamId].assignedSet = set;
+      if (!this.serverlessSession.teamAssignments) this.serverlessSession.teamAssignments = {};
+      this.serverlessSession.teamAssignments[teamId] = set;
+      this.broadcastSession(this.serverlessSession);
+      this.emit('session_updated', { session: this.serverlessSession });
+    }
+
     this.send({
       type: 'host:assign_team_set',
       roomCode: roomCode.toUpperCase(),
@@ -377,6 +603,17 @@ export class RealtimeClient {
   }
 
   public setAllTeamAssignments(roomCode: string, assignments: Record<string, 'A' | 'B'>) {
+    if (this.serverlessSession) {
+      this.serverlessSession.teamAssignments = assignments;
+      Object.entries(assignments).forEach(([tId, s]) => {
+        if (this.serverlessSession?.teams[tId]) {
+          this.serverlessSession.teams[tId].assignedSet = s;
+        }
+      });
+      this.broadcastSession(this.serverlessSession);
+      this.emit('session_updated', { session: this.serverlessSession });
+    }
+
     this.send({
       type: 'host:set_all_team_assignments',
       roomCode: roomCode.toUpperCase(),
@@ -389,7 +626,7 @@ export class RealtimeClient {
   public startHeartbeat() {
     this.stopHeartbeat();
     this.heartbeatTimer = window.setInterval(() => {
-      if (this.currentRole === 'player' && this.currentRoomCode && this.currentTeamId && this.isConnected) {
+      if (this.currentRole === 'player' && this.currentRoomCode && this.currentTeamId) {
         this.send({
           type: 'player:heartbeat',
           roomCode: this.currentRoomCode,
@@ -397,7 +634,7 @@ export class RealtimeClient {
           deviceId: this.currentDeviceId,
         });
       }
-    }, 3500);
+    }, 4000);
   }
 
   public stopHeartbeat() {
@@ -456,6 +693,13 @@ export class RealtimeClient {
   }
 
   public kickTeam(roomCode: string, teamId: string) {
+    if (this.serverlessSession && this.serverlessSession.teams[teamId]) {
+      delete this.serverlessSession.teams[teamId];
+      this.broadcast({ type: 'team_removed', data: { teamId } });
+      this.broadcastSession(this.serverlessSession);
+      this.emit('session_updated', { session: this.serverlessSession });
+    }
+
     this.send({
       type: 'host:kick_team',
       roomCode: roomCode.toUpperCase(),
@@ -464,6 +708,12 @@ export class RealtimeClient {
   }
 
   public updateTeamName(roomCode: string, teamId: string, customTeamName: string) {
+    if (this.serverlessSession && this.serverlessSession.teams[teamId]) {
+      this.serverlessSession.teams[teamId].teamName = customTeamName.trim();
+      this.broadcastSession(this.serverlessSession);
+      this.emit('session_updated', { session: this.serverlessSession });
+    }
+
     this.send({
       type: 'player:update_team_name',
       roomCode: roomCode.toUpperCase(),
@@ -482,8 +732,16 @@ export class RealtimeClient {
     });
   }
 
-
   public updateRoomSettings(roomCode: string, settings: Partial<GameSettings>) {
+    if (this.serverlessSession) {
+      this.serverlessSession.settings = {
+        ...this.serverlessSession.settings,
+        ...settings,
+      };
+      this.broadcastSession(this.serverlessSession);
+      this.emit('session_updated', { session: this.serverlessSession });
+    }
+
     this.send({
       type: 'host:update_room_settings',
       roomCode: roomCode.toUpperCase(),
@@ -492,6 +750,14 @@ export class RealtimeClient {
   }
 
   public startQuestion(roomCode: string, questionIndex: number) {
+    if (this.serverlessSession) {
+      this.serverlessSession.questionStatus = 'active';
+      this.serverlessSession.currentQuestionIndex = questionIndex;
+      this.serverlessSession.questionStartTime = Date.now();
+      this.broadcastSession(this.serverlessSession);
+      this.emit('session_updated', { session: this.serverlessSession });
+    }
+
     this.send({
       type: 'host:start_question',
       roomCode: roomCode.toUpperCase(),
@@ -536,6 +802,12 @@ export class RealtimeClient {
   }
 
   public endQuestion(roomCode: string) {
+    if (this.serverlessSession) {
+      this.serverlessSession.questionStatus = 'results';
+      this.broadcastSession(this.serverlessSession);
+      this.emit('session_updated', { session: this.serverlessSession });
+    }
+
     this.send({
       type: 'host:end_question',
       roomCode: roomCode.toUpperCase(),
@@ -543,6 +815,14 @@ export class RealtimeClient {
   }
 
   public nextQuestion(roomCode: string) {
+    if (this.serverlessSession) {
+      this.serverlessSession.currentQuestionIndex++;
+      this.serverlessSession.questionStatus = 'waiting';
+      this.serverlessSession.questionStartTime = null;
+      this.broadcastSession(this.serverlessSession);
+      this.emit('session_updated', { session: this.serverlessSession });
+    }
+
     this.send({
       type: 'host:next_question',
       roomCode: roomCode.toUpperCase(),
@@ -550,6 +830,12 @@ export class RealtimeClient {
   }
 
   public showLeaderboard(roomCode: string) {
+    if (this.serverlessSession) {
+      this.serverlessSession.questionStatus = 'results';
+      this.broadcastSession(this.serverlessSession);
+      this.emit('session_updated', { session: this.serverlessSession });
+    }
+
     this.send({
       type: 'host:show_leaderboard',
       roomCode: roomCode.toUpperCase(),
@@ -557,6 +843,18 @@ export class RealtimeClient {
   }
 
   public endGame(roomCode: string) {
+    if (this.serverlessSession) {
+      this.serverlessSession.status = 'ended';
+      this.serverlessSession.endedAt = Date.now();
+      this.broadcastSession(this.serverlessSession);
+      this.broadcast({
+        type: 'game_ended',
+        data: { session: this.serverlessSession },
+      });
+      this.emit('session_updated', { session: this.serverlessSession });
+      this.emit('game_ended', { session: this.serverlessSession });
+    }
+
     this.send({
       type: 'host:end_game',
       roomCode: roomCode.toUpperCase(),
@@ -564,6 +862,16 @@ export class RealtimeClient {
   }
 
   public restartGame(roomCode: string) {
+    if (this.serverlessSession) {
+      this.serverlessSession.status = 'lobby';
+      this.serverlessSession.currentQuestionIndex = 0;
+      this.serverlessSession.questionStatus = 'waiting';
+      this.serverlessSession.answers = {};
+      this.serverlessSession.questionStartTime = null;
+      this.broadcastSession(this.serverlessSession);
+      this.emit('session_updated', { session: this.serverlessSession });
+    }
+
     this.send({
       type: 'host:restart_game',
       roomCode: roomCode.toUpperCase(),
@@ -571,6 +879,7 @@ export class RealtimeClient {
   }
 
   public terminateSession(roomCode: string) {
+    this.serverlessSession = null;
     this.send({
       type: 'host:terminate_session',
       roomCode: roomCode.toUpperCase(),
@@ -586,6 +895,28 @@ export class RealtimeClient {
     feedback: string,
     annotatedDrawingDataUrl?: string
   ) {
+    if (this.serverlessSession) {
+      const qAns = this.serverlessSession.answers[questionIndex] || {};
+      if (qAns[teamId]) {
+        qAns[teamId].pointsAwarded = points;
+        qAns[teamId].isCorrect = isCorrect;
+        if (!qAns[teamId].openEnded) {
+          qAns[teamId].openEnded = {};
+        }
+        qAns[teamId].openEnded!.teacherFeedback = feedback;
+        qAns[teamId].openEnded!.teacherPoints = points;
+        qAns[teamId].openEnded!.teacherGrade = isCorrect ? 'correct' : 'wrong';
+        qAns[teamId].openEnded!.annotatedDrawingDataUrl = annotatedDrawingDataUrl;
+        qAns[teamId].openEnded!.gradedAt = Date.now();
+      }
+      this.serverlessSession.answers[questionIndex] = qAns;
+      if (this.serverlessSession.teams[teamId]) {
+        this.serverlessSession.teams[teamId].score = (this.serverlessSession.teams[teamId].score || 0) + points;
+      }
+      this.broadcastSession(this.serverlessSession);
+      this.emit('session_updated', { session: this.serverlessSession });
+    }
+
     this.send({
       type: 'host:grade_open_ended',
       roomCode: roomCode.toUpperCase(),
@@ -602,6 +933,9 @@ export class RealtimeClient {
     this.currentRoomCode = roomCode.toUpperCase();
     this.currentRole = role;
     if (teamId) this.currentTeamId = teamId;
+    if (role === 'player' && this.serverlessSession) {
+      this.emit('session_updated', { session: this.serverlessSession });
+    }
     this.send({
       type: 'sync_request',
       roomCode: this.currentRoomCode,
@@ -619,16 +953,21 @@ export class RealtimeClient {
     return this.currentTeamId;
   }
 
-  // REST fallback for fetching latest state
   public async fetchSessionState(roomCode: string): Promise<SessionState | null> {
-    try {
-      const res = await fetch(`/api/session/${encodeURIComponent(roomCode.toUpperCase())}`);
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data.session;
-    } catch {
-      return null;
+    if (this.serverlessSession && this.serverlessSession.roomCode === roomCode.toUpperCase()) {
+      return this.serverlessSession;
     }
+    if (this.shouldConnectLocalWs()) {
+      try {
+        const res = await fetch(`/api/session/${encodeURIComponent(roomCode.toUpperCase())}`);
+        if (!res.ok) return null;
+        const data = await res.json();
+        return data.session;
+      } catch {
+        return null;
+      }
+    }
+    return null;
   }
 }
 

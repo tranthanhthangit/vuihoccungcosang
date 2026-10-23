@@ -1,7 +1,17 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Retrieve credentials from Vite environment variables or window config
-const envUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
+function sanitizeSupabaseUrl(rawUrl: string): string {
+  let url = (rawUrl || '').trim();
+  // Strip accidental /rest/v1 or /rest/v1/ if copied directly from the REST API box
+  url = url.replace(/\/rest\/v1\/?$/, '');
+  // Strip trailing slashes
+  url = url.replace(/\/+$/, '');
+  return url;
+}
+
+const rawEnvUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
+const envUrl = sanitizeSupabaseUrl(rawEnvUrl);
 const envAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
 
 export const isSupabaseConfigured = (): boolean => {
