@@ -1,8 +1,9 @@
-import React, { useEffect } from 'react';
-import { Sparkles, WifiOff, Volume2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Sparkles, WifiOff, Volume2, RefreshCw } from 'lucide-react';
 import { ConnectedTeam } from '../../types/game';
 import { TEAM_PRESETS } from '../../data/teamPresets';
 import { unlockSpeechAudio, speakVietnamese } from '../../utils/speechVoice';
+import { realtime } from '../../services/realtimeClient';
 
 interface PlayerWaitingProps {
   team: ConnectedTeam;
@@ -21,11 +22,21 @@ export const PlayerWaiting: React.FC<PlayerWaitingProps> = ({
   myAssignedSet,
   assignedSetTitle,
 }) => {
+  const [isSyncing, setIsSyncing] = useState(false);
   const preset = TEAM_PRESETS.find(p => p.id === team.teamId);
 
   useEffect(() => {
     unlockSpeechAudio();
   }, []);
+
+  const handleManualSync = () => {
+    setIsSyncing(true);
+    unlockSpeechAudio();
+    realtime.requestSync(roomCode, 'player', team.teamId);
+    setTimeout(() => {
+      setIsSyncing(false);
+    }, 1200);
+  };
 
   return (
     <div className="flex-1 flex flex-col items-center justify-start pt-3 sm:pt-5 pb-8 px-4 text-center relative overflow-hidden">
@@ -82,7 +93,7 @@ export const PlayerWaiting: React.FC<PlayerWaitingProps> = ({
         )}
 
         {/* Status text */}
-        <div className="bg-emerald-50 border-2 border-emerald-200 rounded-2xl p-4 mb-5">
+        <div className="bg-emerald-50 border-2 border-emerald-200 rounded-2xl p-4 mb-4">
           <div className="flex items-center justify-center gap-1.5 text-emerald-700 font-black text-base sm:text-lg mb-1">
             <Sparkles className="w-5 h-5 text-emerald-500" />
             <span>Đã tham gia thành công!</span>
@@ -99,11 +110,22 @@ export const PlayerWaiting: React.FC<PlayerWaitingProps> = ({
             unlockSpeechAudio();
             speakVietnamese('Bé đã sẵn sàng nghe cô đọc bài!');
           }}
-          className="w-full mb-4 py-2.5 px-3 rounded-2xl bg-amber-50 hover:bg-amber-100 border-2 border-amber-200 text-amber-900 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition active:scale-98 shadow-2xs"
+          className="w-full mb-3 py-2.5 px-3 rounded-2xl bg-amber-50 hover:bg-amber-100 border-2 border-amber-200 text-amber-900 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition active:scale-98 shadow-2xs"
           title="Bấm để thử loa và mở khóa âm thanh trên Safari"
         >
           <Volume2 className="w-4 h-4 text-amber-600 animate-bounce" />
           <span>Bé chạm đây để thử loa và sẵn sàng nghe cô đọc câu hỏi 🔊</span>
+        </button>
+
+        {/* Manual sync button in case child misses start event */}
+        <button
+          type="button"
+          onClick={handleManualSync}
+          disabled={isSyncing}
+          className="w-full mb-4 py-2 px-3 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-800 text-xs font-black flex items-center justify-center gap-2 cursor-pointer transition active:scale-98 shadow-2xs"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 text-sky-600 ${isSyncing ? 'animate-spin' : ''}`} />
+          <span>Cô đã bấm bắt đầu? Chạm đây để vào câu hỏi ngay!</span>
         </button>
 
         <div className="flex items-center justify-center gap-2 text-slate-400 font-bold text-xs mb-2">

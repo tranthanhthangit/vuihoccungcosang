@@ -51,10 +51,17 @@ export class RealtimeClient {
 
   private shouldConnectLocalWs(): boolean {
     if (typeof window === 'undefined') return false;
-    const hostname = window.location.hostname;
-    // ONLY connect to local ws on localhost / 127.0.0.1
-    // Never attempt /ws on Cloudflare (*.workers.dev, *.pages.dev) where no Node server exists
-    return hostname === 'localhost' || hostname === '127.0.0.1';
+    const hostname = window.location.hostname.toLowerCase();
+    // Only disable local Node WS if hosted on static-only serverless platforms
+    if (
+      hostname.endsWith('.pages.dev') ||
+      hostname.endsWith('.workers.dev') ||
+      hostname.endsWith('.netlify.app') ||
+      hostname.endsWith('.vercel.app')
+    ) {
+      return false;
+    }
+    return true;
   }
 
   private initNetworkListeners() {
@@ -272,6 +279,13 @@ export class RealtimeClient {
                 teamId: this.currentTeamId,
                 deviceId: this.currentDeviceId,
                 customTeamName: this.currentCustomTeamName,
+              });
+              this.send({
+                type: 'sync_request',
+                roomCode: roomCode.toUpperCase(),
+                role: 'player',
+                teamId: this.currentTeamId,
+                deviceId: this.currentDeviceId,
               });
             } else {
               // Request current room state snapshot
@@ -664,9 +678,9 @@ export class RealtimeClient {
   // High-level Actions
   public createSession(game: Game, settings?: GameSettings) {
     this.currentRole = 'host';
-    const isLocalServerAvailable = this.ws && this.ws.readyState === WebSocket.OPEN;
+    const useServerless = !this.shouldConnectLocalWs();
 
-    if (!isLocalServerAvailable) {
+    if (useServerless) {
       // Serverless mode (Cloudflare + Supabase or local offline)
       const roomCode = Math.floor(1000 + Math.random() * 9000).toString();
       this.currentRoomCode = roomCode;
@@ -715,9 +729,9 @@ export class RealtimeClient {
 
   public createDualSession(gameA: Game, gameB: Game, settings?: GameSettings) {
     this.currentRole = 'host';
-    const isLocalServerAvailable = this.ws && this.ws.readyState === WebSocket.OPEN;
+    const useServerless = !this.shouldConnectLocalWs();
 
-    if (!isLocalServerAvailable) {
+    if (useServerless) {
       const roomCode = Math.floor(1000 + Math.random() * 9000).toString();
       this.currentRoomCode = roomCode;
       this.initSupabaseRoom(roomCode, 'host');
@@ -817,7 +831,7 @@ export class RealtimeClient {
           deviceId: this.currentDeviceId,
         });
       }
-    }, 4000);
+    }, 3000);
   }
 
   public stopHeartbeat() {
@@ -1237,13 +1251,14 @@ export class RealtimeClient {
     return this.currentTeamId;
   }
 
-  public async fetchSessionState(roomCode: string): Promise<SessionState | null> {
+  public async fetchSessionState(roomCode: string, teamId?: string): Promise<SessionState | null> {
     if (this.serverlessSession && this.serverlessSession.roomCode === roomCode.toUpperCase()) {
       return this.serverlessSession;
     }
     if (this.shouldConnectLocalWs()) {
       try {
-        const res = await fetch(`/api/session/${encodeURIComponent(roomCode.toUpperCase())}`);
+        const query = teamId ? `?teamId=${encodeURIComponent(teamId)}` : '';
+        const res = await fetch(`/api/session/${encodeURIComponent(roomCode.toUpperCase())}${query}`);
         if (!res.ok) return null;
         const data = await res.json();
         return data.session;

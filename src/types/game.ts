@@ -276,6 +276,8 @@ export interface SessionState {
   game: Game;
   // Dual game room properties (Combining 2 question sets)
   isDualMode?: boolean;
+  gameAId?: string;
+  gameA?: Game;
   gameBId?: string;
   gameB?: Game;
   teamAssignments?: Record<string, 'A' | 'B'>; // teamId => 'A' (Set 1) | 'B' (Set 2)

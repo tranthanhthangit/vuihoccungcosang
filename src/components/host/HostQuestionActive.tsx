@@ -181,15 +181,12 @@ export const HostQuestionActive: React.FC<HostQuestionActiveProps> = ({
 
       if (remaining <= 0) {
         clearInterval(timer);
-        if (!hasTriggeredEndRef.current && !isOpenEnded) {
-          hasTriggeredEndRef.current = true;
-          onEndQuestionRef.current();
-        }
+        // Theo yêu cầu: không tự động thu bài hay kết thúc câu khi hết giờ, chỉ dừng đếm và chờ cô giáo bấm nút kết thúc
       }
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [startTime, timeLimit, isNoTimeLimit, isOpenEnded]);
+  }, [startTime, timeLimit, isNoTimeLimit]);
 
   const currentAnswers = session.answers[currentQIndex] || {};
   const teamsList = Object.values(session.teams);
@@ -202,24 +199,9 @@ export const HostQuestionActive: React.FC<HostQuestionActiveProps> = ({
 
   const onlineTeams = teamsList.filter(t => t.online !== false);
   const answeredCount = Object.keys(currentAnswers).length;
-  const totalTeams = teamsList.length;
-
-  // Auto-finish if all active online teams answered, or all teams in room answered
-  const allOnlineAnswered = onlineTeams.length > 0 && onlineTeams.every(t => currentAnswers[t.teamId]);
-  const allAnswered = (totalTeams > 0 && answeredCount >= totalTeams) || allOnlineAnswered;
 
   const isWordDrag = currentQ?.type === 'word_drag_drop';
   const isManualEnd = isOpenEnded || isWordDrag;
-
-  // Auto-finish if all active teams answered (EXCEPT open-ended and word_drag_drop questions which only end when host explicitly clicks "Kết thúc & Thu bài")
-  useEffect(() => {
-    if (allAnswered && !isManualEnd) {
-      const timeout = setTimeout(() => {
-        onEndQuestion();
-      }, 1000);
-      return () => clearTimeout(timeout);
-    }
-  }, [allAnswered, isManualEnd, onEndQuestion]);
 
   const [liveDrafts, setLiveDrafts] = useState<Record<string, { hasDrawn?: boolean; textAnswer?: string; drawingDataUrl?: string }>>({});
 
@@ -388,6 +370,11 @@ export const HostQuestionActive: React.FC<HostQuestionActiveProps> = ({
               <div className={`font-mono font-black text-3xl sm:text-4xl tabular-nums ${timeLeft <= 5 ? 'text-rose-600 animate-pulse' : 'text-slate-800'}`}>
                 00:{timeLeft < 10 ? `0${timeLeft}` : timeLeft}
               </div>
+              {timeLeft <= 0 && (
+                <span className="text-[11px] font-black text-rose-700 bg-rose-100 px-2.5 py-1 rounded-xl border border-rose-300 animate-pulse">
+                  Chờ cô bấm thu bài
+                </span>
+              )}
             </div>
           )}
 

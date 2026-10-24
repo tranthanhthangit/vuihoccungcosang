@@ -70,7 +70,6 @@ export const PlayerJoin: React.FC<PlayerJoinProps> = ({
   const [sessionData, setSessionData] = useState<SessionState | null>(null);
   const [fetchingSession, setFetchingSession] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [isEditingCode, setIsEditingCode] = useState(false);
   const [isEditingTeamName, setIsEditingTeamName] = useState(false);
 
   // Sync initialRoomCode when prop changes or is provided dynamically
@@ -309,55 +308,44 @@ export const PlayerJoin: React.FC<PlayerJoinProps> = ({
                 </div>
               )}
 
-              {/* Room Code & Info Card (Compact on mobile) */}
-              <div className="bg-slate-50 border-2 border-slate-200 rounded-2xl p-2.5 sm:p-3.5">
+              {/* Room Code & Info Card: Always visible & directly editable */}
+              <div className="bg-slate-50 border-2 border-slate-200 rounded-2xl p-2.5 sm:p-3.5 flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
+                  <div className="flex items-center gap-1.5 min-w-0">
                     <span className="text-[10px] sm:text-xs font-black uppercase text-slate-500 shrink-0">MÃ PHÒNG:</span>
-                    <span className="font-mono font-black text-base sm:text-2xl text-slate-900 tracking-wider sm:tracking-widest">
-                      {roomCode || '---'}
-                    </span>
                     {sessionData && (
-                      <span className="text-[11px] font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-lg truncate max-w-[120px] sm:max-w-[180px]">
-                        {sessionData.game.title}
+                      <span className="text-[11px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg truncate max-w-[140px] sm:max-w-[200px]">
+                        ✓ {sessionData.game.title}
                       </span>
                     )}
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsEditingCode(!isEditingCode)}
-                    className="text-[10px] sm:text-xs font-extrabold text-amber-700 hover:text-amber-900 underline shrink-0 cursor-pointer"
-                  >
-                    {isEditingCode ? 'Thu gọn' : (roomCode ? 'Đổi mã' : 'Nhập mã')}
-                  </button>
+                  {roomCode.length >= 4 && !sessionData && (
+                    <span className="text-[10px] font-bold text-amber-600 animate-pulse">
+                      Đang tìm phòng...
+                    </span>
+                  )}
                 </div>
 
-                {/* Expanded Input if changing code or when empty */}
-                {(!roomCode || isEditingCode) && (
-                  <div className="mt-2.5 pt-2 border-t border-slate-200 animate-in fade-in">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        maxLength={6}
-                        value={roomCode}
-                        onChange={(e) => setRoomCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && roomCode && selectedTeamId) {
-                            handleConfirmJoin();
-                          }
-                        }}
-                        placeholder="VD: 1547"
-                        className="w-full py-2 px-3 text-center font-mono font-black text-xl sm:text-2xl tracking-widest text-slate-900 bg-white rounded-xl border-2 border-slate-300 focus:border-amber-400 outline-none uppercase shadow-inner"
-                      />
-                      {fetchingSession && (
-                        <div className="absolute right-3 top-1/2 -translate-y-1/2 text-amber-500 animate-spin">
-                          <RefreshCw className="w-4 h-4 sm:w-5 sm:h-5" />
-                        </div>
-                      )}
+                <div className="relative">
+                  <input
+                    type="text"
+                    maxLength={6}
+                    value={roomCode}
+                    onChange={(e) => setRoomCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && roomCode && selectedTeamId) {
+                        handleConfirmJoin();
+                      }
+                    }}
+                    placeholder="Nhập mã 4 số (VD: 1547)"
+                    className="w-full py-2.5 px-3 text-center font-mono font-black text-xl sm:text-2xl tracking-widest text-slate-900 bg-white rounded-xl border-2 border-slate-300 focus:border-amber-500 focus:ring-2 focus:ring-amber-200 outline-none uppercase shadow-inner transition"
+                  />
+                  {fetchingSession && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 text-amber-500 animate-spin">
+                      <RefreshCw className="w-4 h-4 sm:w-5 sm:h-5" />
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
 
@@ -439,14 +427,9 @@ export const PlayerJoin: React.FC<PlayerJoinProps> = ({
                 // Team is offline/dropped out ("bị văng") and can be re-joined
                 const isDisconnected = Boolean(existingTeam && isOffline);
 
-                // If game is in progress and there are disconnected teams, prioritize recovering them
-                const isGamePlaying = sessionData?.status === 'playing';
-                const hasDisconnectedTeams = Boolean(
-                  sessionData?.teams && Object.values(sessionData.teams).some(t => t.online === false)
-                );
-                const isUnjoinedTeam = !existingTeam;
-                const isBlockedByPriority = isGamePlaying && hasDisconnectedTeams && isUnjoinedTeam;
-                const isDisabled = isLocked || isBlockedByPriority;
+                // Theo yêu cầu: bỏ khóa chọn các đội còn trống khi game đã bắt đầu.
+                // Các đội trống luôn luôn sẵn sàng để học sinh vào muộn (mạng yếu) vẫn vào chơi được!
+                const isDisabled = isLocked;
 
                 return (
                   <button
@@ -493,10 +476,6 @@ export const PlayerJoin: React.FC<PlayerJoinProps> = ({
                       <span className="text-[9px] font-black text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded-md border border-amber-300 mt-0.5 truncate max-w-full flex items-center gap-0.5 animate-pulse">
                         <RotateCcw className="w-2.5 h-2.5 shrink-0" />
                         <span>Bị văng · Vào lại</span>
-                      </span>
-                    ) : isBlockedByPriority ? (
-                      <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md mt-0.5 truncate max-w-full">
-                        Ưu tiên đội văng
                       </span>
                     ) : isTakenByMe ? (
                       <span className="text-[9px] font-black text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-200 mt-0.5 truncate max-w-full">

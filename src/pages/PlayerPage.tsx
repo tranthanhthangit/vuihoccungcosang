@@ -45,6 +45,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
 
   const joinRetryTimerRef = useRef<number | null>(null);
   const joinTimeoutTimerRef = useRef<number | null>(null);
+  const attemptedTeamIdRef = useRef<string | null>(null);
 
   const clearJoinTimers = () => {
     if (joinRetryTimerRef.current) {
@@ -97,11 +98,27 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
   useEffect(() => {
     // Listen to connection changes
     const unsubConn = realtime.on('connection_change', (data: any) => {
-      setIsConnected(data.status === 'connected');
+      const connected = data.status === 'connected';
+      setIsConnected(connected);
+      if (connected && session && joinedTeam) {
+        realtime.requestSync(session.roomCode, 'player', joinedTeam.teamId);
+      }
     });
 
-    // Listen to join success
+    // Listen to join success (ONLY for this device/attempted team)
     const unsubJoin = realtime.on('join_success', (data: any) => {
+      const myDevId = typeof window !== 'undefined' ? localStorage.getItem('vuihoc_device_id') : null;
+
+      // Only accept if this join_success is for our own device or requested team
+      const isForMe = (myDevId && data.team?.deviceId && data.team.deviceId === myDevId) ||
+        (attemptedTeamIdRef.current && data.team?.teamId === attemptedTeamIdRef.current) ||
+        (joinedTeam && data.team?.teamId === joinedTeam.teamId);
+
+      if (!isForMe) {
+        // Do NOT overwrite our session or team with another device's data
+        return;
+      }
+
       clearJoinTimers();
       setSession(data.session);
       setJoinedTeam(data.team);
@@ -117,9 +134,16 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
 
     // Listen to authoritative session updates
     const unsubUpdate = realtime.on('session_updated', (data: any) => {
+      if (!data || !data.session) return;
       setSession(data.session);
-      if (joinedTeam && data.session?.teams?.[joinedTeam.teamId]) {
-        setJoinedTeam(data.session.teams[joinedTeam.teamId]);
+      if (joinedTeam) {
+        const remoteTeam = data.session.teams?.[joinedTeam.teamId];
+        if (remoteTeam) {
+          setJoinedTeam({
+            ...remoteTeam,
+            assignedSet: remoteTeam.assignedSet || data.session.teamAssignments?.[joinedTeam.teamId] || joinedTeam.assignedSet || 'A',
+          });
+        }
       }
     });
 
@@ -187,7 +211,35 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
     };
   }, []);
 
-  // Notify server when browser tab is closed or navigated away
+  // Periodic sync while in waiting lobby so that when host starts question 1,
+  // player immediately transitions out of lobby even if initial broadcast dropped
+  useEffect(() => {
+    if (!session || !joinedTeam || session.status !== 'lobby') return;
+
+    const syncInterval = window.setInterval(async () => {
+      // 1. Send realtime sync request
+      realtime.requestSync(session.roomCode, 'player', joinedTeam.teamId);
+
+      // 2. Fetch session snapshot from REST API as fallback with team-specific query
+      try {
+        const latest = await realtime.fetchSessionState(session.roomCode, joinedTeam.teamId);
+        if (latest && latest.status === 'playing') {
+          setSession(latest);
+          if (latest.teams?.[joinedTeam.teamId]) {
+            const upd = latest.teams[joinedTeam.teamId];
+            setJoinedTeam({
+              ...upd,
+              assignedSet: upd.assignedSet || latest.teamAssignments?.[joinedTeam.teamId] || joinedTeam.assignedSet || 'A',
+            });
+          }
+        }
+      } catch {}
+    }, 2000);
+
+    return () => clearInterval(syncInterval);
+  }, [session?.status, session?.roomCode, joinedTeam?.teamId]);
+
+  // Notify server only when browser tab is definitively closed
   useEffect(() => {
     const handleUnload = () => {
       if (session && joinedTeam) {
@@ -196,10 +248,8 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
     };
 
     window.addEventListener('beforeunload', handleUnload);
-    window.addEventListener('pagehide', handleUnload);
     return () => {
       window.removeEventListener('beforeunload', handleUnload);
-      window.removeEventListener('pagehide', handleUnload);
     };
   }, [session, joinedTeam]);
 
@@ -207,6 +257,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
     setIsJoining(true);
     setJoinError(null);
     setRoomCode(code);
+    attemptedTeamIdRef.current = teamId;
     clearJoinTimers();
 
     realtime.joinRoom(code, teamId, devId, customTeamName);
@@ -331,8 +382,28 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
   }
 
   const currentQIndex = session.currentQuestionIndex;
-  const myAssignedSet = session.myAssignedSet || joinedTeam.assignedSet || session.teamAssignments?.[joinedTeam.teamId] || 'A';
-  const effectiveGame = (session.isDualMode && myAssignedSet === 'B' && session.gameB) ? session.gameB : session.game;
+  const myAssignedSet: 'A' | 'B' = (joinedTeam && joinedTeam.assignedSet) ||
+    (joinedTeam && session.teamAssignments?.[joinedTeam.teamId]) ||
+    session.myAssignedSet ||
+    'A';
+
+  // In Dual Mode, determine the exact question set assigned to this team
+  let effectiveGame = session.game;
+  if (session.isDualMode) {
+    if (myAssignedSet === 'B') {
+      if (session.gameB) {
+        effectiveGame = session.gameB;
+      } else if (session.game && (session.gameId === session.gameBId || session.myAssignedSet === 'B')) {
+        effectiveGame = session.game;
+      }
+    } else {
+      if (session.gameA) {
+        effectiveGame = session.gameA;
+      } else {
+        effectiveGame = session.game;
+      }
+    }
+  }
   const currentQ = effectiveGame.questions[currentQIndex];
   const myAnswer: TeamAnswer | undefined = session.answers[currentQIndex]?.[joinedTeam.teamId];
 
