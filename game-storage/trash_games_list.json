@@ -1,5 +1,22 @@
 [
   {
+    "id": "smoke_test_game_1792835281716",
+    "title": "Smoke Test Game",
+    "description": "Automated test game",
+    "category": "Chữ cái",
+    "playCount": 0,
+    "createdAt": 1792835281716,
+    "questions": [],
+    "settings": {
+      "timeLimitPerQuestion": 30,
+      "pointsPerCorrectAnswer": 10,
+      "maxTeams": 4,
+      "allowLateJoin": true,
+      "autoAdvance": false
+    },
+    "deletedAt": 1792835281751
+  },
+  {
     "id": "smoke_test_game_1792684815083",
     "title": "Smoke Test Game",
     "description": "Automated test game",

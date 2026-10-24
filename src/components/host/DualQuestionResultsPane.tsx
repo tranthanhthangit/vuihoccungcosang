@@ -153,7 +153,7 @@ export const DualQuestionResultsPane: React.FC<DualQuestionResultsPaneProps> = (
           ) : (
             <div className="space-y-1.5 flex-1 min-h-[220px] max-h-[460px] overflow-y-auto pr-1">
               {teams.map((team) => {
-                const ans = answers[team.teamId];
+                const ans = answers[team.teamId] || answers[team.teamId.toLowerCase()];
                 const preset = TEAM_PRESETS.find(p => p.id === team.teamId);
                 const isCorrect = ans?.isCorrect;
                 const points = ans?.pointsAwarded || 0;

@@ -273,13 +273,33 @@ export const HostQuestionActive: React.FC<HostQuestionActiveProps> = ({
       }> = [];
 
       targetTeams.forEach((team) => {
-        const ans = currentAnswers[team.teamId];
-        const draft = session.drafts?.[currentQIndex]?.[team.teamId] || liveDrafts[team.teamId];
+        // Skip offline teams: disconnected teams should not block collecting answers
+        if (team.online === false) return;
+
+        const preset = TEAM_PRESETS.find(p => p.id === team.teamId);
+        const ans = currentAnswers[team.teamId] || currentAnswers[team.teamId.toLowerCase()];
+
+        // Match draft flexibly across currentMergedDrafts, session.drafts, and liveDrafts
+        const draft = currentMergedDrafts[team.teamId] ||
+          currentMergedDrafts[team.teamId.toLowerCase()] ||
+          (preset?.id ? currentMergedDrafts[preset.id] : undefined) ||
+          (session.drafts?.[currentQIndex]?.[team.teamId]) ||
+          (session.drafts?.[String(currentQIndex)]?.[team.teamId]) ||
+          (session.drafts?.[currentQIndex]?.[team.teamId.toLowerCase()]) ||
+          (session.drafts?.[String(currentQIndex)]?.[team.teamId.toLowerCase()]) ||
+          (liveDrafts[team.teamId]) ||
+          (liveDrafts[team.teamId.toLowerCase()]) ||
+          Object.entries(currentMergedDrafts).find(([k]) => {
+            const normK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const normT = (team.teamId || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            return normK === normT;
+          })?.[1];
 
         const hasDrawn = Boolean(
           draft?.hasDrawn ||
-          (draft?.drawingDataUrl && draft.drawingDataUrl.length > 50) ||
-          (ans?.openEnded?.drawingDataUrl && ans.openEnded.drawingDataUrl.length > 50)
+          (draft?.drawingDataUrl && draft.drawingDataUrl.length > 20) ||
+          (ans?.openEnded?.drawingDataUrl && ans.openEnded.drawingDataUrl.length > 20) ||
+          ans?.openEnded?.hasDrawn
         );
         const hasText = Boolean(
           draft?.textAnswer?.trim() ||
@@ -381,10 +401,10 @@ export const HostQuestionActive: React.FC<HostQuestionActiveProps> = ({
           <button
             onClick={handleHostClickEndQuestion}
             className="ml-2 px-5 py-2.5 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white font-extrabold text-sm flex items-center gap-2 shadow-md hover:shadow-lg transition active:scale-95 cursor-pointer ring-2 ring-rose-300 ring-offset-1"
-            title={isManualEnd ? "Bấm để kết thúc câu hỏi và thu bài làm của tất cả các bé" : "Bấm để kết thúc câu hỏi và tự động nộp bài cho tất cả các đội"}
+            title="Bấm để kết thúc câu hỏi và thu bài làm của tất cả các đội"
           >
             <StopCircle className="w-4 h-4" />
-            <span>{isManualEnd ? 'KẾT THÚC & THU BÀI' : 'KẾT THÚC CÂU'}</span>
+            <span>KẾT THÚC & THU BÀI</span>
           </button>
         </div>
       </div>
@@ -702,7 +722,7 @@ export const HostQuestionActive: React.FC<HostQuestionActiveProps> = ({
               <>
                 <span>{answeredCount}</span>
                 <span>/</span>
-                <span>{onlineTeams.length} đội online hoàn thành</span>
+                <span>{onlineTeams.length} đội đã chọn đáp án</span>
                 {teamsList.length > onlineTeams.length && (
                   <span className="text-[11px] text-rose-600 font-extrabold ml-1 bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200">
                     {teamsList.length - onlineTeams.length} mất kết nối
@@ -770,7 +790,7 @@ export const HostQuestionActive: React.FC<HostQuestionActiveProps> = ({
                   {hasAnswered ? (
                     <span className="flex items-center gap-1 text-emerald-700 bg-emerald-100 border border-emerald-300 px-3 py-1 rounded-full text-xs font-black">
                       <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>{isDragDrop ? 'Đã xếp xong' : 'Đã xong'}</span>
+                      <span>{isDragDrop ? 'Đã xếp thẻ' : isWordDrag ? 'Đã ghép chữ' : 'Đã chọn đáp án'}</span>
                     </span>
                   ) : !isOnline ? (
                     <span className="flex items-center gap-1 text-rose-600 bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-full text-xs font-black">

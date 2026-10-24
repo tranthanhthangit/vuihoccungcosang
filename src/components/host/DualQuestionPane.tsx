@@ -268,7 +268,7 @@ export const DualQuestionPane: React.FC<DualQuestionPaneProps> = ({
               Đội thi đấu ({teams.length} đội):
             </span>
             <span className="text-xs font-black text-indigo-700">
-              Đã nộp: {answeredCount}/{teams.length}
+              Đã chọn: {answeredCount}/{teams.length}
             </span>
           </div>
 
@@ -296,8 +296,8 @@ export const DualQuestionPane: React.FC<DualQuestionPaneProps> = ({
 
                 const hasDrawn = Boolean(
                   draft?.hasDrawn ||
-                  (draft?.drawingDataUrl && draft.drawingDataUrl.length > 30) ||
-                  (ans?.openEnded?.drawingDataUrl && ans.openEnded.drawingDataUrl.length > 30) ||
+                  (draft?.drawingDataUrl && draft.drawingDataUrl.length > 20) ||
+                  (ans?.openEnded?.drawingDataUrl && ans.openEnded.drawingDataUrl.length > 20) ||
                   ans?.openEnded?.hasDrawn
                 );
                 const hasText = Boolean(
@@ -324,7 +324,10 @@ export const DualQuestionPane: React.FC<DualQuestionPaneProps> = ({
                     <span>{team.icon || preset?.icon || '⭐'}</span>
                     <span className="truncate max-w-[100px]">{team.teamName}</span>
                     {hasAnswered ? (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span className="flex items-center gap-1 text-[11px] font-black text-emerald-700">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Đã chọn</span>
+                      </span>
                     ) : !isOnline ? (
                       <WifiOff className="w-3 h-3 text-rose-500" />
                     ) : isOpenEnded ? (

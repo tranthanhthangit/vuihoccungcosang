@@ -1015,19 +1015,27 @@ function endQuestionAuthoritatively(session: SessionState, code: string) {
     const maxPoints = question.points || 10;
 
     // Check if there was an active draft saved by this team
-    const draft = session.drafts?.[qIdx]?.[tId];
+    const qDrafts = {
+      ...(session.drafts?.[String(qIdx)] || {}),
+      ...(session.drafts?.[qIdx] || {}),
+    };
+    const draft = qDrafts[tId] ||
+      qDrafts[tId.toLowerCase()] ||
+      Object.entries(qDrafts).find(([k]) => k.toLowerCase().replace(/[^a-z0-9]/g, '') === tId.toLowerCase().replace(/[^a-z0-9]/g, ''))?.[1];
+
     const draftText = (draft?.textAnswer || '').trim();
     const draftDrawing = draft?.drawingDataUrl || '';
-    const hasDraft = Boolean(draftText || (draftDrawing && draftDrawing.length > 50));
+    const hasDraft = Boolean(draftText || (draftDrawing && draftDrawing.length > 20) || draft?.hasDrawn);
 
-    const existingAns = session.answers[qIdx]?.[tId];
+    const existingAns = session.answers[qIdx]?.[tId] || session.answers[qIdx]?.[tId.toLowerCase()];
 
     if (existingAns) {
       // If team already has an answer record (or auto-submitted placeholder), ensure any drawing or text from draft is incorporated
       if (question.type === 'open_ended') {
         if (!existingAns.openEnded) existingAns.openEnded = {};
-        if (draftDrawing && draftDrawing.length > 50) {
+        if (draftDrawing && draftDrawing.length > 20) {
           existingAns.openEnded.drawingDataUrl = draftDrawing;
+          existingAns.openEnded.hasDrawn = true;
         }
         if (draftText) {
           existingAns.openEnded.textAnswer = draftText;
@@ -1035,7 +1043,11 @@ function endQuestionAuthoritatively(session: SessionState, code: string) {
         if (existingAns.openEnded.drawingDataUrl || existingAns.openEnded.textAnswer) {
           existingAns.answerText = existingAns.openEnded.textAnswer
             ? `Tự luận: "${existingAns.openEnded.textAnswer.slice(0, 60)}${existingAns.openEnded.textAnswer.length > 60 ? '...' : ''}"`
-            : 'Bé đã vẽ tranh câu trả lời';
+            : 'Bé đã vẽ tranh câu trả lời 🎨';
+        }
+        if (!existingAns.openEnded.teacherGrade) {
+          existingAns.openEnded.teacherGrade = 'pending';
+          existingAns.openEnded.teacherPoints = maxPoints;
         }
       }
       continue;
@@ -1053,7 +1065,7 @@ function endQuestionAuthoritatively(session: SessionState, code: string) {
       if (hasDraft) {
         answerText = draftText
           ? `Tự luận: "${draftText.slice(0, 60)}${draftText.length > 60 ? '...' : ''}"`
-          : (draftDrawing ? 'Bé đã vẽ tranh câu trả lời' : 'Bé đã làm bài tự luận');
+          : (draftDrawing ? 'Bé đã vẽ tranh câu trả lời 🎨' : 'Bé đã làm bài tự luận');
       } else {
         answerText = 'Đã tự động nộp bài tự luận khi cô kết thúc câu';
       }
@@ -1061,6 +1073,7 @@ function endQuestionAuthoritatively(session: SessionState, code: string) {
       openEndedObj = {
         textAnswer: draftText,
         drawingDataUrl: draftDrawing,
+        hasDrawn: Boolean((draftDrawing && draftDrawing.length > 20) || draft?.hasDrawn),
         teacherGrade: 'pending',
         teacherPoints: maxPoints,
         teacherFeedback: '',
@@ -1514,17 +1527,24 @@ wss.on('connection', (ws: WebSocket) => {
           if (!tId) return;
           if (!session.drafts) session.drafts = {};
           if (!session.drafts[qIdx]) session.drafts[qIdx] = {};
+          if (!session.drafts[String(qIdx)]) session.drafts[String(qIdx)] = session.drafts[qIdx];
 
-          const currentDraft = session.drafts[qIdx][tId] || {};
+          const currentDraft = session.drafts[qIdx][tId] || session.drafts[qIdx][tId.toLowerCase()] || {};
           const newDrawing = msg.drawingDataUrl !== undefined ? msg.drawingDataUrl : (currentDraft.drawingDataUrl || '');
           const newText = msg.textAnswer !== undefined ? msg.textAnswer : (currentDraft.textAnswer || '');
+          const hasDrawn = Boolean(msg.hasDrawn || (newDrawing && newDrawing.length > 20));
 
-          session.drafts[qIdx][tId] = {
+          const draftObj = {
             textAnswer: newText,
             drawingDataUrl: newDrawing,
-            hasDrawn: Boolean(msg.hasDrawn || (newDrawing && newDrawing.length > 50)),
+            hasDrawn,
             updatedAt: Date.now(),
           };
+
+          session.drafts[qIdx][tId] = draftObj;
+          session.drafts[qIdx][tId.toLowerCase()] = draftObj;
+          session.drafts[String(qIdx)][tId] = draftObj;
+          session.drafts[String(qIdx)][tId.toLowerCase()] = draftObj;
 
           // Always broadcast draft progress to host in real-time so teacher knows child has drawn
           broadcastToRoom(code, {
@@ -1973,7 +1993,7 @@ wss.on('connection', (ws: WebSocket) => {
             data: {
               questionIndex: qIdx,
               answerId: record.answerId,
-              message: 'Đã hoàn thành câu hỏi!',
+              message: 'Đã ghi nhận lựa chọn (Bé có thể đổi lại trước khi cô thu bài)',
               isCorrect,
               pointsAwarded,
             },

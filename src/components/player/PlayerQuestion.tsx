@@ -115,17 +115,17 @@ export const PlayerQuestion: React.FC<PlayerQuestionProps> = ({
     }
   };
 
-  // Single choice: select and submit immediately
+  // Single choice: select option (never locks; children can change choice freely until teacher clicks end question)
   const handleSelectSingleOption = (optId: string) => {
     setSelectedOptId(optId);
-    setHasSubmitted(true);
     stopSpeaking();
     sounds.playClick();
 
+    // Update server with current selection, but keep options completely open and changeable
     onSubmitAnswer(optId, [optId]);
   };
 
-  // Multiple choice: toggle option selection and auto record immediately
+  // Multiple choice: toggle option selection (never locks; children can change choices freely)
   const handleToggleMultipleOption = (optId: string) => {
     sounds.playClick();
     stopSpeaking();
@@ -134,7 +134,6 @@ export const PlayerQuestion: React.FC<PlayerQuestionProps> = ({
       : [...selectedOptIds, optId];
 
     setSelectedOptIds(nextSelected);
-    setHasSubmitted(nextSelected.length > 0);
 
     if (nextSelected.length > 0) {
       onSubmitAnswer(nextSelected.join(','), nextSelected);
@@ -219,36 +218,26 @@ export const PlayerQuestion: React.FC<PlayerQuestionProps> = ({
           {question.title}
         </h3>
 
-        {/* Indicator & Status banner for single or multiple correct answers */}
+        {/* Indicator & Status banner for single or multiple correct answers (clean text indicator during active play) */}
         {isMultiple ? (
           selectedOptIds.length > 0 ? (
             <div className="mt-2.5 p-2 sm:p-2.5 rounded-xl bg-emerald-50 border-2 border-emerald-300 text-emerald-800 flex items-center justify-center gap-2 font-black text-xs sm:text-sm animate-pulse-subtle">
               <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 shrink-0" />
-              <span>Đã chọn {selectedOptIds.length} đáp án · Bé có thể chạm đổi trước khi hết giờ ⭐</span>
-            </div>
-          ) : isTimedOut ? (
-            <div className="mt-2.5 p-2.5 rounded-xl bg-rose-50 border-2 border-rose-300 text-rose-800 flex items-center justify-center gap-2 font-black text-xs sm:text-sm">
-              <AlertTriangle className="w-4 h-4 sm:w-5 sm:h-5 text-rose-600 shrink-0" />
-              <span>Đã hết thời gian câu này rồi!</span>
+              <span>Đã chọn {selectedOptIds.length} đáp án · Bé có thể chạm đổi đáp án trước khi cô thu bài ⭐</span>
             </div>
           ) : (
             <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-300 text-amber-800 text-xs sm:text-sm font-black">
               <span>✨ Câu hỏi nhiều đáp án đúng: Bé chạm chọn tất cả các tranh đúng nhé!</span>
             </div>
           )
-        ) : hasSubmitted ? (
+        ) : selectedOptId ? (
           <div className="mt-2.5 p-2 sm:p-2.5 rounded-xl bg-emerald-50 border-2 border-emerald-300 text-emerald-800 flex items-center justify-center gap-2 font-black text-xs sm:text-sm animate-pulse-subtle">
             <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 shrink-0" />
-            <span>Đã tự động ghi nhận câu trả lời của bé! Chờ cô công bố đáp án nhé ⭐</span>
-          </div>
-        ) : isTimedOut ? (
-          <div className="mt-2.5 p-2.5 rounded-xl bg-rose-50 border-2 border-rose-300 text-rose-800 flex items-center justify-center gap-2 font-black text-xs sm:text-sm">
-            <AlertTriangle className="w-4 h-4 sm:w-5 sm:h-5 text-rose-600 shrink-0" />
-            <span>Đã hết thời gian câu này rồi!</span>
+            <span>Bé đã chọn đáp án! (Bé có thể chạm đổi sang đáp án khác trước khi cô thu bài ⭐)</span>
           </div>
         ) : (
           <div className="mt-1.5 text-xs sm:text-sm font-bold text-slate-500">
-            👉 Chạm vào 1 đáp án to bên dưới để hệ thống tự ghi nhận nhé!
+            👉 Chạm vào 1 đáp án to bên dưới để chọn nhé! (Bé có thể đổi lại bất cứ lúc nào)
           </div>
         )}
       </div>
@@ -260,13 +249,11 @@ export const PlayerQuestion: React.FC<PlayerQuestionProps> = ({
         {question.options.map((opt, idx) => {
           const color = buttonColors[idx % buttonColors.length];
           const isSelected = isMultiple ? selectedOptIds.includes(opt.id) : selectedOptId === opt.id;
-          const isTimeExpired = !isNoTimeLimit && timeLeft <= 0;
 
           return (
             <button
               key={opt.id}
               type="button"
-              disabled={isTimeExpired}
               onClick={() => {
                 if (isMultiple) {
                   handleToggleMultipleOption(opt.id);
@@ -282,14 +269,15 @@ export const PlayerQuestion: React.FC<PlayerQuestionProps> = ({
                 isSelected
                   ? 'ring-4 ring-offset-2 ring-white scale-[1.02] shadow-2xl z-10'
                   : 'hover:scale-[1.01]'
-              } ${isTimeExpired ? 'cursor-not-allowed opacity-75' : 'cursor-pointer'}`}
+              } cursor-pointer`}
             >
               {/* Checkmark or checkbox indicator for selected option while keeping original color */}
               {isMultiple ? (
                 <div className="absolute top-2.5 right-2.5 sm:top-3.5 sm:right-3.5 text-white">
                   {isSelected ? (
-                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-white/30 backdrop-blur-sm border-2 border-white flex items-center justify-center shadow-sm">
-                      <CheckSquare className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+                    <div className="px-2.5 py-1 rounded-xl bg-white text-emerald-700 border-2 border-emerald-400 flex items-center gap-1 font-black text-xs shadow-md">
+                      <CheckSquare className="w-4 h-4 text-emerald-600" />
+                      <span>ĐÃ CHỌN</span>
                     </div>
                   ) : (
                     <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-black/10 border-2 border-white/50 flex items-center justify-center">
@@ -298,8 +286,9 @@ export const PlayerQuestion: React.FC<PlayerQuestionProps> = ({
                   )}
                 </div>
               ) : isSelected ? (
-                <div className="absolute top-2.5 right-2.5 sm:top-3.5 sm:right-3.5 w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-white/30 backdrop-blur-sm border-2 border-white flex items-center justify-center text-white shadow-sm">
-                  <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6 text-white stroke-[3]" />
+                <div className="absolute top-2.5 right-2.5 sm:top-3.5 sm:right-3.5 px-3 py-1 rounded-full bg-white text-emerald-700 border-2 border-emerald-400 flex items-center gap-1 font-black text-xs shadow-md">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 stroke-[3]" />
+                  <span>ĐÃ CHỌN</span>
                 </div>
               ) : null}
 

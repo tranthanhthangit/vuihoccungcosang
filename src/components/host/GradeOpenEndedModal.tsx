@@ -47,13 +47,20 @@ export const GradeOpenEndedModal: React.FC<GradeOpenEndedModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  const team = session.teams[teamId];
+  const team = session.teams[teamId] || session.teams[teamId.toLowerCase()];
   const isTeamB = session.isDualMode && (team?.assignedSet === 'B' || session.teamAssignments?.[teamId] === 'B');
   const question: Question | undefined = isTeamB
     ? (session.gameB?.questions[questionIndex] || session.game.questions[questionIndex])
     : session.game.questions[questionIndex];
-  const answer: TeamAnswer | undefined = session.answers[questionIndex]?.[teamId];
-  const draft = session.drafts?.[questionIndex]?.[teamId];
+  const answer: TeamAnswer | undefined = session.answers[questionIndex]?.[teamId] || session.answers[questionIndex]?.[teamId.toLowerCase()];
+  const qDrafts = {
+    ...(session.drafts?.[String(questionIndex)] || {}),
+    ...(session.drafts?.[questionIndex] || {}),
+  };
+  const draft = qDrafts[teamId] ||
+    qDrafts[teamId.toLowerCase()] ||
+    Object.entries(qDrafts).find(([k]) => k.toLowerCase().replace(/[^a-z0-9]/g, '') === teamId.toLowerCase().replace(/[^a-z0-9]/g, ''))?.[1];
+
   const openEnded = answer?.openEnded;
   const originalDrawing = openEnded?.annotatedDrawingDataUrl || openEnded?.drawingDataUrl || draft?.drawingDataUrl || '';
   const textContent = openEnded?.textAnswer || draft?.textAnswer || '';

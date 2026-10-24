@@ -920,10 +920,18 @@ export const HostQuestionResults: React.FC<HostQuestionResultsProps> = ({
                       </div>
 
                       {(() => {
-                        const draft = session.drafts?.[currentQIndex]?.[team.teamId];
-                        const displayDrawing = ans?.openEnded?.annotatedDrawingDataUrl || ans?.openEnded?.drawingDataUrl || draft?.drawingDataUrl;
-                        const displayText = ans?.openEnded?.textAnswer || draft?.textAnswer;
-                        const hasSubmittedWork = Boolean(displayDrawing || displayText);
+                        const qDrafts = {
+                          ...(session.drafts?.[String(currentQIndex)] || {}),
+                          ...(session.drafts?.[currentQIndex] || {}),
+                        };
+                        const draft = qDrafts[team.teamId] ||
+                          qDrafts[team.teamId.toLowerCase()] ||
+                          Object.entries(qDrafts).find(([k]) => k.toLowerCase().replace(/[^a-z0-9]/g, '') === team.teamId.toLowerCase().replace(/[^a-z0-9]/g, ''))?.[1];
+
+                        const teamAns = currentAnswers[team.teamId] || currentAnswers[team.teamId.toLowerCase()];
+                        const displayDrawing = teamAns?.openEnded?.annotatedDrawingDataUrl || teamAns?.openEnded?.drawingDataUrl || draft?.drawingDataUrl;
+                        const displayText = teamAns?.openEnded?.textAnswer || draft?.textAnswer;
+                        const hasSubmittedWork = Boolean(displayDrawing || displayText || draft?.hasDrawn);
 
                         return (
                           <div className="flex flex-col sm:flex-row gap-3 items-start bg-slate-50 p-2.5 rounded-xl border border-slate-200">

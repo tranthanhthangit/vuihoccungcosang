@@ -56,7 +56,7 @@ export const PlayerDragDropQuestion: React.FC<PlayerDragDropQuestionProps> = ({
     return {};
   });
 
-  const [hasSubmitted, setHasSubmitted] = useState<boolean>(Boolean(existingAnswer));
+  const [hasSubmitted, setHasSubmitted] = useState<boolean>(false);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [dragCurrentPos, setDragCurrentPos] = useState<{ x: number; y: number } | null>(null);
@@ -166,7 +166,6 @@ export const PlayerDragDropQuestion: React.FC<PlayerDragDropQuestionProps> = ({
 
   // Touch / Pointer Dragging Logic for kids
   const handlePointerDown = (e: React.PointerEvent, elemId: string) => {
-    if (hasSubmitted) return;
     const targetEl = config?.elements.find((el) => el.id === elemId);
     if (!targetEl || !isCardDraggable(targetEl)) return;
 
@@ -274,15 +273,8 @@ export const PlayerDragDropQuestion: React.FC<PlayerDragDropQuestionProps> = ({
       }, 0);
       const effectiveCompletionCount = Math.min(allDraggables.length, totalZoneCapacity);
 
-      // Auto-submit if all slots are filled or all cards are placed
-      if (
-        (Object.keys(nextPlacements).length >= allDraggables.length && allDraggables.length > 0) ||
-        (effectiveCompletionCount > 0 && Object.keys(nextPlacements).length >= effectiveCompletionCount && Object.keys(nextPlacements).length >= targetRequiredCount)
-      ) {
-        setHasSubmitted(true);
-        sounds.playFanfare();
-        onSubmitPlacements(nextPlacements, true); // Final submission
-      }
+      // Live progress is continuously sent; question never auto-submits or auto-locks!
+      // Children can rearrange, remove, or swap cards freely until teacher ends question.
     } else {
       // Released outside any drop zone!
       // If the card was previously placed in a zone, pulling it out removes it from the zone!
@@ -347,14 +339,11 @@ export const PlayerDragDropQuestion: React.FC<PlayerDragDropQuestionProps> = ({
             <span>Không tính giờ</span>
           </span>
 
-          {!hasSubmitted && placedCount > 0 && (
-            <button
-              type="button"
-              onClick={handleManualSubmit}
-              className="px-3.5 py-1 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-black text-xs shadow-md transition active:scale-95 cursor-pointer flex items-center gap-1"
-            >
-              <span>Nộp bài ✓</span>
-            </button>
+          {placedCount > 0 && (
+            <span className="flex items-center gap-1 text-[11px] font-black text-emerald-800 bg-emerald-50 border border-emerald-300 px-2.5 py-1 rounded-xl shadow-2xs">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Đã lưu (Bé có thể đổi thẻ ⭐)</span>
+            </span>
           )}
         </div>
       </div>
@@ -571,21 +560,6 @@ export const PlayerDragDropQuestion: React.FC<PlayerDragDropQuestionProps> = ({
                   </React.Fragment>
                 );
               })}
-            </div>
-          </div>
-        )}
-
-        {/* Lock overlay when submitted */}
-        {hasSubmitted && (
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-40 pointer-events-auto">
-            <div className="bg-white rounded-3xl p-6 max-w-xs text-center shadow-2xl border-4 border-emerald-400 animate-in fade-in">
-              <CheckCircle2 className="w-14 h-14 text-emerald-500 mx-auto mb-2 animate-bounce" />
-              <h3 className="text-xl font-black text-slate-900">
-                BÉ ĐÃ XẾP XONG!
-              </h3>
-              <p className="text-xs font-bold text-slate-500 mt-1">
-                Kết quả đã được gửi lên máy cô. Bé hãy chú ý nhìn lên màn hình của cô nhé! ⭐
-              </p>
             </div>
           </div>
         )}

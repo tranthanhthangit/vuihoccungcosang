@@ -104,9 +104,11 @@ export const PlayerResult: React.FC<PlayerResultProps> = ({
           {/* Details */}
           <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-3.5 sm:p-4 border border-slate-200 text-left text-xs font-extrabold flex flex-col gap-2.5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <span className="text-slate-500 shrink-0">Lựa chọn của đội:</span>
+              <span className="text-slate-600 font-extrabold shrink-0">
+                {chosenOpts.some(o => o.imageUrl) ? 'Hình đáp án bé đã chọn:' : 'Lựa chọn của đội:'}
+              </span>
               {chosenOpts.length > 0 ? (
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-2">
                   {chosenOpts.map((opt) => {
                     const optIdx = question.options?.findIndex(o => o.id === opt.id) ?? -1;
                     const letter = optIdx >= 0 ? letters[optIdx] : '•';
@@ -115,13 +117,13 @@ export const PlayerResult: React.FC<PlayerResultProps> = ({
                     return (
                       <span
                         key={opt.id}
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-extrabold border shadow-2xs ${
+                        className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-2xl text-xs font-black border-2 shadow-xs ${
                           isOptCorrect
-                            ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
-                            : 'bg-rose-100 text-rose-900 border-rose-300'
+                            ? 'bg-emerald-50 text-emerald-950 border-emerald-400'
+                            : 'bg-rose-50 text-rose-950 border-rose-300'
                         }`}
                       >
-                        <span className={`w-5 h-5 rounded-lg flex items-center justify-center text-[10px] font-black text-white shrink-0 ${
+                        <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black text-white shrink-0 shadow-2xs ${
                           isOptCorrect ? 'bg-emerald-600' : 'bg-rose-600'
                         }`}>
                           {letter}
@@ -129,14 +131,16 @@ export const PlayerResult: React.FC<PlayerResultProps> = ({
                         {opt.imageUrl && (
                           <img
                             src={opt.imageUrl}
-                            alt={opt.text || ''}
-                            className="w-8 h-8 sm:w-10 sm:h-10 object-contain rounded-lg bg-white border border-slate-200 p-0.5 shrink-0 shadow-2xs"
+                            alt={opt.text || 'Hình đáp án'}
+                            className="h-16 sm:h-20 md:h-22 w-auto max-w-[130px] sm:max-w-[150px] object-contain rounded-xl bg-white border border-slate-200 p-1 shrink-0 shadow-2xs"
                           />
                         )}
                         {opt.text && opt.text.trim() ? (
-                          <span className="max-w-[140px] truncate">{opt.text}</span>
+                          <span className="max-w-[140px] truncate font-extrabold">{opt.text}</span>
                         ) : null}
-                        <span className="font-black">{isOptCorrect ? '✓' : '✗'}</span>
+                        <span className={`font-black text-xs ${isOptCorrect ? 'text-emerald-700' : 'text-rose-600'}`}>
+                          {isOptCorrect ? '✓ Đúng' : '✗ Chưa đúng'}
+                        </span>
                       </span>
                     );
                   })}
@@ -178,32 +182,34 @@ export const PlayerResult: React.FC<PlayerResultProps> = ({
             )}
 
             {!isOpenEnded && (
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-slate-100 pt-2">
-                <span className="text-slate-500 shrink-0">Đáp án chính xác:</span>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
+                <span className="text-slate-600 font-extrabold shrink-0">
+                  {correctOptions.some(o => o.imageUrl) ? 'Hình đáp án đúng của cô:' : 'Đáp án chính xác:'}
+                </span>
                 {correctOptions.length > 0 && correctOptions.some(o => o.imageUrl) ? (
-                  <div className="flex flex-wrap items-center gap-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
                     {correctOptions.map((opt) => {
                       const optIdx = question.options?.findIndex(o => o.id === opt.id) ?? -1;
                       const letter = optIdx >= 0 ? letters[optIdx] : '•';
                       return (
                         <span
                           key={opt.id}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-black bg-emerald-100 text-emerald-950 border border-emerald-300 shadow-2xs"
+                          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-2xl text-xs font-black bg-emerald-50 text-emerald-950 border-2 border-emerald-400 shadow-xs"
                         >
-                          <span className="w-5 h-5 rounded-lg flex items-center justify-center text-[10px] font-black text-white bg-emerald-600 shrink-0">
+                          <span className="w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black text-white bg-emerald-600 shrink-0 shadow-2xs">
                             {letter}
                           </span>
                           {opt.imageUrl && (
                             <img
                               src={opt.imageUrl}
-                              alt={opt.text || ''}
-                              className="w-8 h-8 sm:w-10 sm:h-10 object-contain rounded-lg bg-white border border-emerald-300 p-0.5 shrink-0 shadow-2xs"
+                              alt={opt.text || 'Đáp án đúng'}
+                              className="h-16 sm:h-20 md:h-22 w-auto max-w-[130px] sm:max-w-[150px] object-contain rounded-xl bg-white border border-emerald-300 p-1 shrink-0 shadow-2xs"
                             />
                           )}
                           {opt.text && opt.text.trim() ? (
-                            <span className="max-w-[140px] truncate">{opt.text}</span>
+                            <span className="max-w-[140px] truncate font-extrabold">{opt.text}</span>
                           ) : null}
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 stroke-[3]" />
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 stroke-[3]" />
                         </span>
                       );
                     })}
