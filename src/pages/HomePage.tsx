@@ -7,7 +7,8 @@ import {
   Check,
   Search,
   X,
-  CheckCircle2
+  CheckCircle2,
+  User,
 } from 'lucide-react';
 import { sounds } from '../utils/sound';
 import { DEFAULT_GAMES } from '../data/defaultGames';
@@ -20,6 +21,7 @@ import {
   subscribeFeaturedGame
 } from '../services/gameStorage';
 import { SelectRoomTypeModal } from '../components/host/SelectRoomTypeModal';
+import { useAuth } from '../context/AuthContext';
 
 interface HomePageProps {
   onQuickPlay: (game: Game) => void;
@@ -28,6 +30,7 @@ interface HomePageProps {
   onCreateDualRoom?: () => void;
   onJoinRoom: () => void;
   onViewHistory: () => void;
+  onOpenProfile?: () => void;
 }
 
 export const HomePage: React.FC<HomePageProps> = ({
@@ -37,7 +40,9 @@ export const HomePage: React.FC<HomePageProps> = ({
   onCreateDualRoom,
   onJoinRoom,
   onViewHistory,
+  onOpenProfile,
 }) => {
+  const { currentUser } = useAuth();
   const [allGamesList, setAllGamesList] = useState<Game[]>(() => getAllGames());
   const [featuredId, setFeaturedId] = useState<string>(() => getFeaturedGameId());
   const [toastFeedback, setToastFeedback] = useState<string | null>(null);
@@ -224,6 +229,49 @@ export const HomePage: React.FC<HomePageProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Member quick access bar when logged in */}
+      {currentUser && onOpenProfile && (
+        <div className="bg-white rounded-3xl border border-indigo-100 p-4 mb-6 shadow-2xs flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black text-sm shadow-xs ${
+              currentUser.role === 'admin'
+                ? 'bg-rose-600 text-white'
+                : currentUser.role === 'teacher_premium'
+                ? 'bg-amber-400 text-slate-900'
+                : 'bg-indigo-600 text-white'
+            }`}>
+              {currentUser.role === 'admin' ? '👑' : currentUser.role === 'teacher_premium' ? '⭐' : currentUser.fullName.charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs sm:text-sm font-black text-slate-900">
+                  Chào {currentUser.fullName}!
+                </span>
+                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100">
+                  {currentUser.role === 'admin' ? 'Quản trị viên' : currentUser.role === 'teacher_premium' ? 'VIP Premium' : 'Giáo viên Member'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Xem kho câu hỏi đã tạo, lịch sử phòng thi đấu và quản lý tài khoản của cô
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              sounds.playClick();
+              onOpenProfile();
+            }}
+            className="px-4 py-2 rounded-2xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-extrabold text-xs flex items-center gap-1.5 border border-indigo-200 transition active:scale-95 cursor-pointer"
+          >
+            <User className="w-3.5 h-3.5" />
+            <span>Vào trang cá nhân</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* ---------------------------------------------------- */}
       {/* 4 MAIN ACTION CARDS (2x2 GRID) AS IN ORIGINAL MOCKUP */}

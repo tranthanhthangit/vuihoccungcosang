@@ -28,10 +28,16 @@ import {
   HelpCircle,
   MoveUp,
   MoveDown,
+  Crown,
+  Shield,
+  AlertTriangle,
+  Globe,
+  Lock as LockIcon,
 } from 'lucide-react';
 import { sounds } from '../../utils/sound';
-import { saveGame } from '../../services/gameStorage';
+import { saveGame, submitGameForApproval } from '../../services/gameStorage';
 import { saveInteractiveQuestion } from '../../services/interactiveQuestionStorage';
+import { useAuth } from '../../context/AuthContext';
 
 interface InteractiveGameBuilderProps {
   initialGame?: Game | null;
@@ -44,6 +50,12 @@ export const InteractiveGameBuilder: React.FC<InteractiveGameBuilderProps> = ({
   onSaveAndExit,
   onCancel,
 }) => {
+  const { currentUser, quota, isMember, isPremium, isAdmin, incrementUserGamesCount } = useAuth();
+
+  // Quota & Publish Modals
+  const [isQuotaExceededOpen, setIsQuotaExceededOpen] = useState(false);
+  const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+
   // Game metadata
   const [gameTitle, setGameTitle] = useState<string>(initialGame?.title || 'TRÒ CHƠI KÉO THẢ TƯƠNG TÁC');
   const [description, setDescription] = useState<string>(initialGame?.description || 'Bé kéo thả chữ cái và hình ảnh vào đúng ô');
@@ -176,6 +188,11 @@ export const InteractiveGameBuilder: React.FC<InteractiveGameBuilderProps> = ({
 
   // Create brand new question directly from an uploaded image
   const handleAddQuestionFromImage = (imageUrl: string, imageName: string) => {
+    if (questions.length >= quota.maxQuestionsPerGame) {
+      sounds.playWrong();
+      setIsQuotaExceededOpen(true);
+      return;
+    }
     sounds.playCorrect();
     const cleanName = imageName.replace(/\.[^/.]+$/, '');
     const newIdx = questions.length + 1;
@@ -582,6 +599,11 @@ export const InteractiveGameBuilder: React.FC<InteractiveGameBuilderProps> = ({
   };
 
   const handleAddQuestion = () => {
+    if (questions.length >= quota.maxQuestionsPerGame) {
+      sounds.playWrong();
+      setIsQuotaExceededOpen(true);
+      return;
+    }
     sounds.playClick();
     const newIdx = questions.length + 1;
     const newQ: Question = {
@@ -612,6 +634,11 @@ export const InteractiveGameBuilder: React.FC<InteractiveGameBuilderProps> = ({
   };
 
   const handleDuplicateCurrentQuestion = (idx: number) => {
+    if (questions.length >= quota.maxQuestionsPerGame) {
+      sounds.playWrong();
+      setIsQuotaExceededOpen(true);
+      return;
+    }
     sounds.playClick();
     const target = questions[idx];
     if (!target) return;
@@ -649,7 +676,10 @@ export const InteractiveGameBuilder: React.FC<InteractiveGameBuilderProps> = ({
     handleSelectQuestion(targetIdx);
   };
 
-  const handleSaveGame = (publishMode: boolean = false) => {
+  const handleSaveGame = (
+    publishMode: boolean = false,
+    visibility: 'private' | 'pending_approval' = 'private'
+  ) => {
     sounds.playCorrect();
     const finalGame: Game = {
       id: initialGame?.id || 'game_builder_' + Math.random().toString(36).substring(2, 9),
@@ -663,6 +693,11 @@ export const InteractiveGameBuilder: React.FC<InteractiveGameBuilderProps> = ({
       createdAt: initialGame?.createdAt || Date.now(),
       updatedAt: Date.now(),
       playCount: initialGame?.playCount || 0,
+      authorId: currentUser?.id,
+      authorName: currentUser?.fullName || 'Cô giáo mầm non',
+      authorEmail: currentUser?.email,
+      visibility: visibility,
+      submittedForApprovalAt: visibility === 'pending_approval' ? Date.now() : undefined,
       settings: {
         timePerQuestion: 0,
         speedBonus: true,
@@ -680,6 +715,7 @@ export const InteractiveGameBuilder: React.FC<InteractiveGameBuilderProps> = ({
     });
 
     saveGame(finalGame);
+    incrementUserGamesCount();
     onSaveAndExit(finalGame);
   };
 
@@ -800,7 +836,7 @@ export const InteractiveGameBuilder: React.FC<InteractiveGameBuilderProps> = ({
           </button>
 
           <button
-            onClick={() => handleSaveGame(true)}
+            onClick={() => setIsPublishModalOpen(true)}
             className="px-3.5 sm:px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-black text-xs flex items-center gap-1.5 shadow-md shadow-emerald-200 transition active:scale-95 cursor-pointer"
           >
             <Sparkles className="w-4 h-4 text-emerald-100" />
@@ -851,8 +887,21 @@ export const InteractiveGameBuilder: React.FC<InteractiveGameBuilderProps> = ({
                 <ChevronLeft className="w-4 h-4" />
               </button>
 
-              <span className="text-xs font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-xl whitespace-nowrap">
-                CÂU {currentQIndex + 1} / {questions.length}
+              <span className="text-xs font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-xl whitespace-nowrap flex items-center gap-1.5">
+                <span>CÂU {currentQIndex + 1} / {questions.length}</span>
+                {quota.maxQuestionsPerGame !== Infinity ? (
+                  <span className={`text-[10px] px-1 py-0.2 rounded font-bold ${
+                    questions.length >= quota.maxQuestionsPerGame
+                      ? 'bg-rose-200 text-rose-800'
+                      : 'bg-indigo-100 text-indigo-600'
+                  }`}>
+                    (Tối đa {quota.maxQuestionsPerGame})
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-amber-600 font-black flex items-center gap-0.5">
+                    <Crown className="w-2.5 h-2.5" /> VIP ∞
+                  </span>
+                )}
               </span>
 
               <button
@@ -1067,6 +1116,125 @@ export const InteractiveGameBuilder: React.FC<InteractiveGameBuilderProps> = ({
           question={currentQuestion}
           onClose={() => setIsPreviewOpen(false)}
         />
+      )}
+
+      {/* QUOTA EXCEEDED MODAL (Member: Max 20 Questions) */}
+      {isQuotaExceededOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border-2 border-amber-200 p-6 space-y-4 text-center animate-in zoom-in-95 duration-200">
+            <div className="w-16 h-16 rounded-3xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto text-3xl shadow-inner border border-amber-200">
+              ⚠️
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-slate-900">
+                Đã đạt giới hạn câu hỏi (20 câu)
+              </h3>
+              <p className="text-xs text-slate-500 font-medium mt-1.5 leading-relaxed">
+                Tài khoản <b>Giáo viên Member</b> hỗ trợ tối đa <b>20 câu hỏi</b> trong mỗi bộ đề.
+                Để tạo bộ đề không giới hạn số lượng câu hỏi và mở khóa các tính năng nâng cao, cô hãy nâng cấp lên tài khoản <b>VIP Premium</b> nhé!
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-left space-y-1.5 text-xs text-amber-900 font-bold">
+              <div className="flex items-center gap-1.5 text-amber-800">
+                <Crown className="w-4 h-4 text-amber-600" />
+                <span>Đặc quyền Giáo viên Premium (VIP):</span>
+              </div>
+              <p className="text-[11px] font-medium text-amber-800 leading-normal">
+                ✓ Tạo câu hỏi không giới hạn (100+ câu/bộ đề)<br/>
+                ✓ Mở đồng thời không giới hạn phòng chơi<br/>
+                ✓ Xuất báo cáo điểm số chi tiết từng câu & tải tranh vẽ ZIP
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsQuotaExceededOpen(false)}
+              className="w-full py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs transition cursor-pointer shadow-md"
+            >
+              Đã hiểu, quay lại chỉnh sửa
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* PUBLISH VISIBILITY MODAL (Private vs. Request Public Approval) */}
+      {isPublishModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl border-2 border-indigo-100 overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="p-5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-black">Xuất bản bộ trò chơi</h3>
+                <p className="text-xs text-emerald-100 font-medium">
+                  Cô vui lòng chọn phạm vi chia sẻ cho bộ đề này
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPublishModalOpen(false)}
+                className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 sm:p-6 space-y-3.5">
+              {/* Option 1: Private */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPublishModalOpen(false);
+                  handleSaveGame(true, 'private');
+                }}
+                className="w-full text-left p-4 rounded-2xl border-2 border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/50 transition cursor-pointer group flex items-start gap-3.5"
+              >
+                <div className="w-11 h-11 rounded-2xl bg-slate-100 group-hover:bg-indigo-600 group-hover:text-white text-slate-600 flex items-center justify-center shrink-0 transition-colors">
+                  <LockIcon className="w-5 h-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-black text-sm text-slate-900 group-hover:text-indigo-900 flex items-center justify-between">
+                    <span>Lưu bài dạy riêng tư (Private)</span>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">Khuyên dùng cho lớp</span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    Chỉ lưu trữ trong danh sách bài dạy của cô. Chỉ các bé có mã phòng của lớp mới có thể tham gia chơi.
+                  </p>
+                </div>
+              </button>
+
+              {/* Option 2: Request Public Approval */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPublishModalOpen(false);
+                  handleSaveGame(true, 'pending_approval');
+                }}
+                className="w-full text-left p-4 rounded-2xl border-2 border-amber-200 hover:border-amber-400 hover:bg-amber-50/50 transition cursor-pointer group flex items-start gap-3.5"
+              >
+                <div className="w-11 h-11 rounded-2xl bg-amber-100 group-hover:bg-amber-500 group-hover:text-white text-amber-700 flex items-center justify-center shrink-0 transition-colors">
+                  <Globe className="w-5 h-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-black text-sm text-slate-900 group-hover:text-amber-900 flex items-center justify-between">
+                    <span>Gửi Admin duyệt công khai toàn website</span>
+                    <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full uppercase">
+                      Admin duyệt
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    Bộ đề sẽ được chuyển sang hàng đợi kiểm duyệt của Quản trị viên. Sau khi được duyệt, tất cả các cô giáo trên toàn website đều có thể xem và sử dụng.
+                  </p>
+                </div>
+              </button>
+
+              {currentUser && (
+                <p className="text-[11px] text-slate-400 text-center font-medium pt-1">
+                  Đăng tải với tư cách tác giả: <b>{currentUser.fullName}</b> ({currentUser.email})
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

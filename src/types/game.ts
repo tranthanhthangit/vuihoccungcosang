@@ -148,6 +148,29 @@ export interface OpenEndedSubmission {
   gradedAt?: number;
 }
 
+export type UserRole = 'admin' | 'teacher_member' | 'teacher_premium' | 'student';
+
+export interface UserQuota {
+  maxQuestionsPerGame: number; // 20 cho Member, Infinity cho Premium/Admin
+  maxActiveRooms: number;       // 2 cho Member, Infinity cho Premium/Admin
+  canExportAdvancedReport: boolean;
+  hasVipBadge: boolean;
+}
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  fullName: string;
+  schoolName?: string;
+  role: UserRole;
+  status: 'active' | 'suspended';
+  createdAt: number;
+  lastLoginAt: number;
+  createdGamesCount: number;
+}
+
+export type GameVisibility = 'private' | 'pending_approval' | 'public';
+
 export interface GameSettings {
   timePerQuestion: number; // in seconds
   speedBonus: boolean;
@@ -177,6 +200,17 @@ export interface Game {
   zipFileName?: string;
   gameUrl?: string;
   deletedAt?: number;
+
+  // Role-Based Access Control & Visibility
+  authorId?: string;
+  authorName?: string;
+  authorEmail?: string;
+  visibility?: GameVisibility; // 'private' | 'pending_approval' | 'public'
+  submittedForApprovalAt?: number;
+  approvedAt?: number;
+  approvedBy?: string;
+  rejectionReason?: string;
+  isSystemDefault?: boolean; // Bộ đề chuẩn của website do Admin quản lý
 }
 
 export interface TeamPreset {

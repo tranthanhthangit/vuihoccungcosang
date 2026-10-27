@@ -1,5 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Play, Edit3, Copy, Trash2, BookOpen, Users, Sparkles, Search, FileCode, Eye, Archive, Filter, X, CheckCircle2, Star, Heart } from 'lucide-react';
+import {
+  Plus,
+  Play,
+  Edit3,
+  Copy,
+  Trash2,
+  BookOpen,
+  Users,
+  Sparkles,
+  Search,
+  FileCode,
+  Eye,
+  Archive,
+  Filter,
+  X,
+  CheckCircle2,
+  Star,
+  Heart,
+  Globe,
+  Lock,
+  Clock,
+  Shield,
+  Send,
+  GraduationCap,
+} from 'lucide-react';
 import { Game } from '../../types/game';
 import { GameCoverIllustration } from './GameCoverIllustration';
 import {
@@ -16,7 +40,9 @@ import {
   getFavoriteGameIds,
   toggleFavoriteGameId,
   subscribeFavorites,
+  submitGameForApproval,
 } from '../../services/gameStorage';
+import { useAuth } from '../../context/AuthContext';
 import { sounds } from '../../utils/sound';
 import { Modal } from '../common/Modal';
 import { UploadHtmlGameModal } from './UploadHtmlGameModal';
@@ -36,12 +62,14 @@ export const GameList: React.FC<GameListProps> = ({
   onCreateNewGame,
   onCreateDualRoom,
 }) => {
+  const { currentUser, isAdmin, isPremium, isMember } = useAuth();
   const [games, setGames] = useState<Game[]>(() => getAllGames());
   const [trashGames, setTrashGames] = useState<Game[]>(() => getTrashGames());
   const [isTrashModalOpen, setIsTrashModalOpen] = useState<boolean>(false);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
   const [featuredId, setFeaturedId] = useState<string>(() => getFeaturedGameId());
   const [favoriteIds, setFavoriteIds] = useState<string[]>(() => getFavoriteGameIds());
+  const [visibilityTab, setVisibilityTab] = useState<'all' | 'my_games' | 'pending' | 'system'>('all');
 
   useEffect(() => {
     const unsubGames = subscribeGames((updatedGames) => {
@@ -84,6 +112,19 @@ export const GameList: React.FC<GameListProps> = ({
     setActionFeedback(`✨ Đã ghim trò chơi "${game.title}" lên banner trang chủ!`);
     setTimeout(() => setActionFeedback(null), 3500);
   };
+
+  const handleRequestApproval = (game: Game, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    sounds.playCorrect();
+    submitGameForApproval(game.id, {
+      id: currentUser?.id,
+      name: currentUser?.fullName,
+      email: currentUser?.email,
+    });
+    setActionFeedback(`🚀 Đã gửi bộ đề "${game.title}" đến Quản trị viên để phê duyệt công khai!`);
+    setTimeout(() => setActionFeedback(null), 3500);
+  };
+
   const [selectedCategory, setSelectedCategory] = useState<string>('Tất cả');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [gameToDelete, setGameToDelete] = useState<Game | null>(null);
@@ -113,6 +154,21 @@ export const GameList: React.FC<GameListProps> = ({
   ];
 
   const filteredGames = games.filter(g => {
+    // 1. Visibility Tab Filter
+    let matchVisibility = true;
+    if (visibilityTab === 'my_games') {
+      matchVisibility = Boolean(
+        currentUser &&
+        ((g.authorEmail && g.authorEmail.toLowerCase() === currentUser.email.toLowerCase()) ||
+         (g.authorId && g.authorId === currentUser.id))
+      );
+    } else if (visibilityTab === 'pending') {
+      matchVisibility = g.visibility === 'pending_approval';
+    } else if (visibilityTab === 'system') {
+      matchVisibility = Boolean(g.isSystemDefault || g.visibility === 'public');
+    }
+
+    // 2. Category Filter
     let matchCat = true;
     if (selectedCategory === '⭐ Nổi bật') {
       matchCat = g.id === featuredId;
@@ -122,9 +178,11 @@ export const GameList: React.FC<GameListProps> = ({
       matchCat = g.category === selectedCategory;
     }
 
+    // 3. Search Query Filter
     const matchSearch = g.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       g.description.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchCat && matchSearch;
+
+    return matchVisibility && matchCat && matchSearch;
   });
 
   const handleDuplicate = (game: Game) => {
@@ -248,6 +306,86 @@ export const GameList: React.FC<GameListProps> = ({
 
       {/* Filter and Search Bar */}
       <div className="bg-white rounded-3xl p-5 border-2 border-slate-100 shadow-sm mb-8 space-y-4">
+        {/* Top visibility segmented control tabs */}
+        <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100/80 rounded-2xl border border-slate-200">
+          <button
+            type="button"
+            onClick={() => {
+              sounds.playClick();
+              setVisibilityTab('all');
+            }}
+            className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-black transition cursor-pointer flex items-center gap-1.5 ${
+              visibilityTab === 'all'
+                ? 'bg-white text-indigo-700 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <span>Tất cả kho đề</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-700 font-bold tabular-nums">
+              {games.length}
+            </span>
+          </button>
+
+          {currentUser && (
+            <button
+              type="button"
+              onClick={() => {
+                sounds.playClick();
+                setVisibilityTab('my_games');
+              }}
+              className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-black transition cursor-pointer flex items-center gap-1.5 ${
+                visibilityTab === 'my_games'
+                  ? 'bg-white text-indigo-700 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <GraduationCap className="w-3.5 h-3.5 text-indigo-600" />
+              <span>Bài dạy của tôi</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-indigo-100 text-indigo-800 font-bold tabular-nums">
+                {games.filter(g => (g.authorEmail && g.authorEmail.toLowerCase() === currentUser.email.toLowerCase()) || (g.authorId && g.authorId === currentUser.id)).length}
+              </span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => {
+              sounds.playClick();
+              setVisibilityTab('pending');
+            }}
+            className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-black transition cursor-pointer flex items-center gap-1.5 ${
+              visibilityTab === 'pending'
+                ? 'bg-white text-amber-800 shadow-xs ring-1 ring-amber-300'
+                : 'text-slate-600 hover:text-amber-800'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5 text-amber-600" />
+            <span>Chờ duyệt</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-800 font-bold tabular-nums">
+              {games.filter(g => g.visibility === 'pending_approval').length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              sounds.playClick();
+              setVisibilityTab('system');
+            }}
+            className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-black transition cursor-pointer flex items-center gap-1.5 ${
+              visibilityTab === 'system'
+                ? 'bg-white text-emerald-800 shadow-xs ring-1 ring-emerald-300'
+                : 'text-slate-600 hover:text-emerald-800'
+            }`}
+          >
+            <Shield className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Đề mẫu Website</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 font-bold tabular-nums">
+              {games.filter(g => g.isSystemDefault || g.visibility === 'public').length}
+            </span>
+          </button>
+        </div>
+
         {/* Top line: Search Input & Quick Info */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           {/* Search Input */}
@@ -342,11 +480,29 @@ export const GameList: React.FC<GameListProps> = ({
                   <GameCoverIllustration game={game} />
 
                   {/* Floating Badges Over Cover */}
-                  {/* Top-Left: Category & ZIP/HTML5 */}
+                  {/* Top-Left: Category, Visibility & ZIP/HTML5 */}
                   <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 z-10 flex-wrap">
                     <span className="text-[10px] font-black uppercase tracking-wider text-slate-800 bg-white/95 backdrop-blur-md px-2.5 py-1 rounded-full shadow-xs border border-white/70">
                       {game.category}
                     </span>
+
+                    {game.visibility === 'pending_approval' ? (
+                      <span className="text-[9px] font-black uppercase tracking-wider text-amber-900 bg-amber-100/95 backdrop-blur-md px-2 py-0.5 rounded-full shadow-xs flex items-center gap-1 border border-amber-300">
+                        <Clock className="w-2.5 h-2.5 text-amber-600" />
+                        <span>Chờ duyệt</span>
+                      </span>
+                    ) : game.visibility === 'private' ? (
+                      <span className="text-[9px] font-black uppercase tracking-wider text-slate-700 bg-slate-100/95 backdrop-blur-md px-2 py-0.5 rounded-full shadow-xs flex items-center gap-1 border border-slate-300">
+                        <Lock className="w-2.5 h-2.5 text-slate-500" />
+                        <span>Riêng tư</span>
+                      </span>
+                    ) : (
+                      <span className="text-[9px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-100/95 backdrop-blur-md px-2 py-0.5 rounded-full shadow-xs flex items-center gap-1 border border-emerald-300">
+                        <Globe className="w-2.5 h-2.5 text-emerald-600" />
+                        <span>{game.isSystemDefault ? 'Đề mẫu' : 'Công khai'}</span>
+                      </span>
+                    )}
+
                     {(game.gameType === 'html_game' || game.isCustomHtml) && (
                       <span className="text-[9px] font-black uppercase tracking-wider text-white bg-cyan-600/90 backdrop-blur-md px-2 py-0.5 rounded-full shadow-xs flex items-center gap-1 border border-cyan-400/40">
                         {game.isZipArchive ? (
@@ -427,6 +583,16 @@ export const GameList: React.FC<GameListProps> = ({
                     {game.description}
                   </p>
                 )}
+                {game.authorName && (
+                  <p className="text-[11px] font-medium text-slate-400 mt-1 px-1">
+                    Tác giả: <b>{game.authorName}</b>
+                  </p>
+                )}
+                {game.rejectionReason && (
+                  <div className="mt-1.5 p-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-[11px] font-semibold">
+                    ⚠️ Admin phản hồi: {game.rejectionReason}
+                  </div>
+                )}
               </div>
 
               {/* 3. Action Buttons */}
@@ -441,6 +607,21 @@ export const GameList: React.FC<GameListProps> = ({
                   <Play className="w-3.5 h-3.5 fill-current" />
                   <span>CHƠI NGAY</span>
                 </button>
+
+                {/* Submit for Public Approval button if private and current user's game */}
+                {currentUser &&
+                  (game.authorEmail === currentUser.email || game.authorId === currentUser.id) &&
+                  game.visibility === 'private' && (
+                    <button
+                      type="button"
+                      onClick={(e) => handleRequestApproval(game, e)}
+                      className="py-2.5 px-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 font-extrabold text-[11px] flex items-center gap-1 transition cursor-pointer"
+                      title="Gửi bộ đề này cho Admin phê duyệt để công khai toàn website"
+                    >
+                      <Send className="w-3.5 h-3.5 text-amber-600" />
+                      <span className="hidden xl:inline">Gửi duyệt</span>
+                    </button>
+                  )}
 
                 <div className="flex items-center gap-1">
                   {/* Preview / Test Play Button (Especially for HTML games) */}

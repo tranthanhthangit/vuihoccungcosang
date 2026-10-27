@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import confetti from 'canvas-confetti';
-import { Trophy, Download, RotateCcw, Home, CheckCircle, XCircle, Clock, ChevronDown, ChevronUp, BarChart3, Printer, Search, Eye, PenTool, CheckCircle2 } from 'lucide-react';
+import { Trophy, Download, RotateCcw, Home, CheckCircle, XCircle, Clock, ChevronDown, ChevronUp, BarChart3, Printer, Search, Eye, PenTool, CheckCircle2, Crown } from 'lucide-react';
 import { SessionState, LeaderboardEntry } from '../../types/game';
 import { TEAM_PRESETS } from '../../data/teamPresets';
 import { sounds } from '../../utils/sound';
@@ -8,6 +8,7 @@ import { saveGameHistory } from '../../services/gameStorage';
 import { Modal } from '../common/Modal';
 import { TeamAnswersDetailModal } from './TeamAnswersDetailModal';
 import { GradeOpenEndedModal } from './GradeOpenEndedModal';
+import { useAuth } from '../../context/AuthContext';
 
 interface HostFinalReportProps {
   session: SessionState;
@@ -20,6 +21,7 @@ export const HostFinalReport: React.FC<HostFinalReportProps> = ({
   onReplay,
   onHome,
 }) => {
+  const { currentUser, isPremium, isAdmin } = useAuth();
   const [expandedTeamId, setExpandedTeamId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'matrix' | 'byQuestion' | 'overview'>('matrix');
   const [showExitConfirm, setShowExitConfirm] = useState(false);
@@ -110,30 +112,40 @@ export const HostFinalReport: React.FC<HostFinalReportProps> = ({
         questionsCount: questions.length,
         winnerTeamName: winner.teamName,
         winnerScore: winner.score,
+        teacherEmail: currentUser?.email,
+        teacherName: currentUser?.fullName,
       });
     }
   }, []);
 
-  // CSV Export function
+  // CSV Export function (Member: Basic ranking summary; Premium/Admin: Advanced detailed breakdown)
   const handleExportCSV = () => {
     sounds.playClick();
+    const isAdvanced = isPremium || isAdmin;
     let csv = `BÁO CÁO TỔNG KẾT TRÒ CHƠI: ${session.game.title}\n`;
-    csv += `Mã phòng: ${session.roomCode}, Ngày: ${new Date().toLocaleDateString('vi-VN')}\n\n`;
+    csv += `Mã phòng: ${session.roomCode}, Ngày: ${new Date().toLocaleDateString('vi-VN')}\n`;
+    csv += `Loại báo cáo: ${isAdvanced ? 'Báo cáo chi tiết nâng cao (VIP Premium)' : 'Báo cáo kết quả cơ bản (Giáo viên Member)'}\n\n`;
 
-    // Table 1: Rankings
-    csv += 'Hạng,Tên Đội,Điểm Số,Số Câu Đúng,Tổng Số Câu,Thời Gian TB (s)\n';
+    // Table 1: Rankings & Totals (Available for both Member and Premium)
+    csv += 'Hạng,Tên Đội,Điểm Số,Số Câu Đúng,Tổng Số Câu,Tỷ Lệ Đúng,Thời Gian TB (s)\n';
     standings.forEach(s => {
-      csv += `${s.rank},"${s.teamName}",${s.score},${s.correctCount},${questions.length},${(s.avgResponseTimeMs / 1000).toFixed(1)}\n`;
+      const accuracy = questions.length > 0 ? Math.round((s.correctCount / questions.length) * 100) : 0;
+      csv += `${s.rank},"${s.teamName}",${s.score},${s.correctCount},${questions.length},${accuracy}%,${(s.avgResponseTimeMs / 1000).toFixed(1)}\n`;
     });
 
-    csv += '\nCHI TIẾT TỪNG CÂU HỎI:\n';
-    csv += 'Câu,Nội Dung,Đội,Đáp Án Chọn,Kết Quả,Điểm,Thời Gian (s)\n';
-    questions.forEach((q, qIdx) => {
-      teamsList.forEach(t => {
-        const ans = session.answers[qIdx]?.[t.teamId];
-        csv += `${qIdx + 1},"${q.title.replace(/"/g, '""')}","${t.teamName}","${ans ? ans.answerText.replace(/"/g, '""') : 'Không'}",${ans?.isCorrect ? 'ĐÚNG' : 'SAI'},${ans?.pointsAwarded || 0},${ans ? (ans.responseTimeMs / 1000).toFixed(1) : 0}\n`;
+    if (isAdvanced) {
+      // Table 2: Detailed question-by-question breakdown (Premium/Admin exclusive)
+      csv += '\nCHI TIẾT TỪNG CÂU HỎI & ĐÁP ÁN TỪNG ĐỘI (TÍNH NĂNG NÂNG CAO VIP):\n';
+      csv += 'Câu,Nội Dung,Đội,Đáp Án Chọn,Kết Quả,Điểm,Thời Gian (s)\n';
+      questions.forEach((q, qIdx) => {
+        teamsList.forEach(t => {
+          const ans = session.answers[qIdx]?.[t.teamId];
+          csv += `${qIdx + 1},"${q.title.replace(/"/g, '""')}","${t.teamName}","${ans ? ans.answerText.replace(/"/g, '""') : 'Không'}",${ans?.isCorrect ? 'ĐÚNG' : 'SAI'},${ans?.pointsAwarded || 0},${ans ? (ans.responseTimeMs / 1000).toFixed(1) : 0}\n`;
+        });
       });
-    });
+    } else {
+      csv += '\n(*) Lưu ý: Tài khoản Member xuất kết quả cơ bản. Để xuất phân tích chi tiết từng câu hỏi và thời gian phản hồi, cô có thể nâng cấp tài khoản Giáo viên (Premium).\n';
+    }
 
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -230,10 +242,19 @@ export const HostFinalReport: React.FC<HostFinalReportProps> = ({
 
             <button
               onClick={handleExportCSV}
-              className="px-5 py-3 rounded-2xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-extrabold text-sm flex items-center gap-2 transition"
+              className={`px-5 py-3 rounded-2xl font-extrabold text-sm flex items-center gap-2 transition cursor-pointer ${
+                isPremium || isAdmin
+                  ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 shadow-xs'
+                  : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+              }`}
+              title={isPremium || isAdmin ? 'Xuất báo cáo chi tiết nâng cao (VIP Premium)' : 'Xuất kết quả cơ bản (Giáo viên Member)'}
             >
-              <Download className="w-4 h-4" />
-              <span>XUẤT BÁO CÁO (CSV)</span>
+              {isPremium || isAdmin ? (
+                <Crown className="w-4 h-4 text-amber-600 shrink-0" />
+              ) : (
+                <Download className="w-4 h-4 shrink-0" />
+              )}
+              <span>{isPremium || isAdmin ? 'XUẤT KẾT QUẢ CHI TIẾT (VIP)' : 'XUẤT KẾT QUẢ CƠ BẢN'}</span>
             </button>
 
             <button

@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Home, Users, Sparkles, ChevronDown, Gamepad2, Layers, User as UserIcon } from 'lucide-react';
+import { Home, Users, Sparkles, ChevronDown, Gamepad2, Layers, User as UserIcon, Shield, Crown } from 'lucide-react';
 import { SoundToggle } from './SoundToggle';
 import { sounds } from '../../utils/sound';
 import { useAuth } from '../../context/AuthContext';
 import { TeacherAuthModal } from '../auth/TeacherAuthModal';
+import { getPendingApprovalGames, subscribeGames } from '../../services/gameStorage';
 
 interface HeaderProps {
-
   title?: string;
   subtitle?: string;
   onBack?: () => void;
@@ -15,6 +15,8 @@ interface HeaderProps {
   onCreateDefaultRoom?: () => void;
   onCreateDualRoom?: () => void;
   onJoinRoom?: () => void;
+  onOpenAdminPortal?: () => void;
+  onOpenProfile?: () => void;
   rightAction?: React.ReactNode;
 }
 
@@ -24,13 +26,23 @@ export const Header: React.FC<HeaderProps> = ({
   onCreateDefaultRoom,
   onCreateDualRoom,
   onJoinRoom,
+  onOpenAdminPortal,
+  onOpenProfile,
   rightAction,
 }) => {
-  const { user } = useAuth();
+  const { user, currentUser, role, isAdmin, isPremium, isMember } = useAuth();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [pendingCount, setPendingCount] = useState<number>(() => getPendingApprovalGames().length);
   const hoverTimerRef = useRef<NodeJS.Timeout | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const unsub = subscribeGames(() => {
+      setPendingCount(getPendingApprovalGames().length);
+    });
+    return () => unsub();
+  }, []);
 
 
   const handleLogoClick = () => {
@@ -248,29 +260,90 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="whitespace-nowrap hidden sm:inline">Tham gia phòng</span>
             </button>
           )}
+
+          {/* Admin Portal Button (Visible only to Admin) */}
+          {isAdmin && onOpenAdminPortal && (
+            <button
+              type="button"
+              onClick={() => {
+                sounds.playClick();
+                onOpenAdminPortal();
+              }}
+              className="p-2 sm:px-3.5 sm:py-2.5 rounded-full bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-700 hover:to-red-700 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-md shadow-rose-200 hover:shadow-lg transition active:scale-95 cursor-pointer shrink-0 animate-pulse-subtle"
+              title="Cổng quản trị hệ thống và phê duyệt bộ đề"
+            >
+              <Shield className="w-4 h-4 fill-current shrink-0" />
+              <span className="whitespace-nowrap hidden sm:inline">Quản trị</span>
+              {pendingCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-white text-rose-700 tabular-nums shadow-xs">
+                  {pendingCount}
+                </span>
+              )}
+            </button>
+          )}
         </div>
 
         {/* Right: Sound Toggle, Teacher Auth & Optional Extra Action */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {rightAction}
 
-          {/* Teacher Login / Account button */}
-          {user ? (
+          {/* Quick link to Member Profile when logged in */}
+          {currentUser && onOpenProfile && (
+            <button
+              type="button"
+              onClick={() => {
+                sounds.playClick();
+                onOpenProfile();
+              }}
+              className="p-1.5 sm:px-3 sm:py-2 rounded-full bg-white hover:bg-indigo-50 text-indigo-700 font-extrabold text-xs flex items-center gap-1.5 border border-indigo-200 hover:border-indigo-300 transition active:scale-95 cursor-pointer shadow-2xs shrink-0"
+              title="Vào xem câu hỏi đã tạo, lịch sử thi đấu và chỉnh sửa thông tin"
+            >
+              <UserIcon className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+              <span className="hidden sm:inline">Trang cá nhân</span>
+            </button>
+          )}
+
+          {/* Teacher Login / Account button with Role Indication */}
+          {currentUser ? (
             <button
               type="button"
               onClick={() => {
                 sounds.playClick();
                 setIsAuthModalOpen(true);
               }}
-              className="p-1 sm:px-2.5 sm:py-1.5 rounded-full bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-extrabold text-xs flex items-center gap-1.5 border border-indigo-200 transition active:scale-95 cursor-pointer shadow-2xs"
-              title={`Đã đăng nhập: ${user.user_metadata?.full_name || user.email}. Bấm để xem thông tin`}
+              className={`p-1 sm:px-2.5 sm:py-1.5 rounded-full font-extrabold text-xs flex items-center gap-1.5 border transition active:scale-95 cursor-pointer shadow-2xs ${
+                isAdmin
+                  ? 'bg-rose-50 hover:bg-rose-100 text-rose-900 border-rose-300'
+                  : isPremium
+                  ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                  : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border-indigo-200'
+              }`}
+              title={`Đã đăng nhập: ${currentUser.fullName} (${currentUser.role}). Bấm để xem thông tin`}
             >
-              <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-indigo-600 to-purple-600 text-white flex items-center justify-center text-xs font-black shadow-xs">
-                {user.email?.charAt(0).toUpperCase() || 'C'}
+              <div
+                className={`w-6 h-6 rounded-full text-white flex items-center justify-center text-xs font-black shadow-xs ${
+                  isAdmin
+                    ? 'bg-rose-600'
+                    : isPremium
+                    ? 'bg-gradient-to-tr from-amber-500 to-yellow-500 text-slate-900'
+                    : 'bg-indigo-600'
+                }`}
+              >
+                {isAdmin ? '👑' : isPremium ? '⭐' : currentUser.fullName.charAt(0).toUpperCase()}
               </div>
               <span className="hidden md:inline truncate max-w-[90px]">
-                {user.user_metadata?.full_name || 'Cô giáo'}
+                {currentUser.fullName}
               </span>
+              {isPremium && (
+                <span className="text-[9px] font-black uppercase px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 shadow-2xs">
+                  VIP
+                </span>
+              )}
+              {isAdmin && (
+                <span className="text-[9px] font-black uppercase px-1.5 py-0.2 rounded-full bg-rose-600 text-white shadow-2xs">
+                  Admin
+                </span>
+              )}
             </button>
           ) : (
             <button
@@ -280,7 +353,7 @@ export const Header: React.FC<HeaderProps> = ({
                 setIsAuthModalOpen(true);
               }}
               className="p-1.5 sm:px-3 sm:py-2 rounded-full bg-white hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 font-extrabold text-xs flex items-center gap-1.5 border border-slate-200 hover:border-indigo-300 transition active:scale-95 cursor-pointer shadow-2xs"
-              title="Đăng nhập tài khoản Giáo viên (Supabase Cloud)"
+              title="Đăng nhập tài khoản Giáo viên"
             >
               <UserIcon className="w-3.5 h-3.5 text-indigo-600" />
               <span className="hidden sm:inline">Tài khoản</span>
@@ -295,6 +368,8 @@ export const Header: React.FC<HeaderProps> = ({
       <TeacherAuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
+        onOpenAdminPortal={onOpenAdminPortal}
+        onOpenProfile={onOpenProfile}
       />
     </header>
   );

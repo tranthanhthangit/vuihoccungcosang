@@ -12,10 +12,14 @@ import { WordDragGameBuilder } from './components/builder/WordDragGameBuilder';
 import { CreateGameTypeModal } from './components/games/CreateGameTypeModal';
 import { CreateDualRoomModal } from './components/host/CreateDualRoomModal';
 import { HistoryPage } from './pages/HistoryPage';
+import { AdminDashboard } from './components/admin/AdminDashboard';
+import { MemberProfilePage } from './components/profile/MemberProfilePage';
 import { DEFAULT_GAMES } from './data/defaultGames';
-import { getGameById } from './services/gameStorage';
+import { getGameById, getTeacherActiveRoomCount, registerActiveRoom, closeActiveRoom } from './services/gameStorage';
 import { Modal } from './components/common/Modal';
 import { realtime } from './services/realtimeClient';
+import { useAuth } from './context/AuthContext';
+import { Crown, AlertTriangle } from 'lucide-react';
 
 export type AppView =
   | 'home'
@@ -23,14 +27,18 @@ export type AppView =
   | 'builder'
   | 'host'
   | 'player'
-  | 'history';
+  | 'history'
+  | 'admin_dashboard'
+  | 'member_profile';
 
 export default function App() {
+  const { currentUser, isMember, quota, isAdmin } = useAuth();
   const [currentView, setCurrentView] = useState<AppView>('home');
   const [activeGame, setActiveGame] = useState<Game | null>(DEFAULT_GAMES[0]);
   const [activeGameB, setActiveGameB] = useState<Game | null>(null);
   const [isDualMode, setIsDualMode] = useState<boolean>(false);
   const [isDualRoomModalOpen, setIsDualRoomModalOpen] = useState<boolean>(false);
+  const [isRoomQuotaExceededOpen, setIsRoomQuotaExceededOpen] = useState<boolean>(false);
   const [editingGame, setEditingGame] = useState<Game | null>(null);
   const [playerRoomCode, setPlayerRoomCode] = useState<string>('');
   const [isCreateTypeModalOpen, setIsCreateTypeModalOpen] = useState(false);
@@ -161,6 +169,10 @@ export default function App() {
         setCurrentView('games_list');
       } else if (pathname.includes('/history')) {
         setCurrentView('history');
+      } else if (pathname.includes('/admin')) {
+        setCurrentView('admin_dashboard');
+      } else if (pathname.includes('/profile')) {
+        setCurrentView('member_profile');
       } else {
         setCurrentView('home');
       }
@@ -181,6 +193,13 @@ export default function App() {
   };
 
   const handleQuickPlay = (game: Game) => {
+    if (currentUser && isMember && quota.maxActiveRooms !== Infinity) {
+      const activeCount = getTeacherActiveRoomCount(currentUser.email);
+      if (activeCount >= quota.maxActiveRooms) {
+        setIsRoomQuotaExceededOpen(true);
+        return;
+      }
+    }
     setActiveGame(game);
     setActiveGameB(null);
     setIsDualMode(false);
@@ -193,6 +212,13 @@ export default function App() {
   };
 
   const handleStartDualRoom = (gameA: Game, gameB: Game) => {
+    if (currentUser && isMember && quota.maxActiveRooms !== Infinity) {
+      const activeCount = getTeacherActiveRoomCount(currentUser.email);
+      if (activeCount >= quota.maxActiveRooms) {
+        setIsRoomQuotaExceededOpen(true);
+        return;
+      }
+    }
     setActiveGame(gameA);
     setActiveGameB(gameB);
     setIsDualMode(true);
@@ -364,6 +390,8 @@ export default function App() {
               ? 'Kho trò chơi mầm non'
               : currentView === 'history'
               ? 'Lịch sử buổi học'
+              : currentView === 'admin_dashboard'
+              ? 'Quản trị hệ thống'
               : 'Thế giới trò chơi mầm non'
           }
           onCreateRoom={() => {
@@ -400,6 +428,8 @@ export default function App() {
               navigateTo('player', '/join');
             }
           }}
+          onOpenAdminPortal={() => navigateTo('admin_dashboard', '/admin')}
+          onOpenProfile={() => navigateTo('member_profile', '/profile')}
           onHome={
             currentView !== 'home'
               ? handleHeaderBackOrHome
@@ -418,6 +448,7 @@ export default function App() {
             onCreateDualRoom={() => setIsDualRoomModalOpen(true)}
             onJoinRoom={() => navigateTo('player', '/join')}
             onViewHistory={() => navigateTo('history', '/history')}
+            onOpenProfile={() => navigateTo('member_profile', '/profile')}
           />
         )}
 
@@ -499,6 +530,23 @@ export default function App() {
             onBack={() => navigateTo('home', '/')}
           />
         )}
+
+        {currentView === 'admin_dashboard' && (
+          <AdminDashboard
+            onBackToHome={() => navigateTo('home', '/')}
+            onSelectGameToPlay={handleQuickPlay}
+            onEditGame={handleEditGame}
+          />
+        )}
+
+        {currentView === 'member_profile' && (
+          <MemberProfilePage
+            onBack={() => navigateTo('home', '/')}
+            onPlayGame={handleQuickPlay}
+            onEditGame={handleEditGame}
+            onCreateNewGame={handleCreateNewGame}
+          />
+        )}
       </main>
 
       {/* Modal to choose game creation type */}
@@ -541,6 +589,46 @@ export default function App() {
         onConfirm={handleConfirmExitPlayer}
         onCancel={() => setShowPlayerExitConfirm(false)}
       />
+
+      {/* Room Quota Exceeded Modal (Member: Max 2 active rooms) */}
+      {isRoomQuotaExceededOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border-2 border-amber-200 p-6 space-y-4 text-center animate-in zoom-in-95 duration-200">
+            <div className="w-16 h-16 rounded-3xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto text-3xl shadow-inner border border-amber-200">
+              ⚡
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-slate-900">
+                Đã đạt giới hạn phòng chơi (2 phòng)
+              </h3>
+              <p className="text-xs text-slate-500 font-medium mt-1.5 leading-relaxed">
+                Tài khoản <b>Giáo viên Member</b> hỗ trợ tạo tối đa <b>2 phòng chơi cùng lúc</b>.
+                Cô hãy đóng bớt phòng cũ đã mở trước đó hoặc nâng cấp tài khoản lên <b>VIP Premium</b> để mở không giới hạn phòng nhé!
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-left space-y-1.5 text-xs text-amber-900 font-bold">
+              <div className="flex items-center gap-1.5 text-amber-800">
+                <Crown className="w-4 h-4 text-amber-600" />
+                <span>Đặc quyền Giáo viên Premium (VIP):</span>
+              </div>
+              <p className="text-[11px] font-medium text-amber-800 leading-normal">
+                ✓ Mở đồng thời không giới hạn phòng thi đấu<br/>
+                ✓ Tạo bộ đề không giới hạn số câu (100+ câu/bộ đề)<br/>
+                ✓ Xuất báo cáo điểm số chi tiết từng câu & tải tranh vẽ ZIP
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsRoomQuotaExceededOpen(false)}
+              className="w-full py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs transition cursor-pointer shadow-md"
+            >
+              Đã hiểu, quay lại
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,111 +1,204 @@
-# Kế hoạch triển khai - Tích hợp Cloudflare Pages & Supabase (Auth, Database, Realtime)
+# Hệ Thống Phân Quyền Người Dùng & Quản Trị Hệ Thống (RBAC 4 Tầng)
 
-Kế hoạch chuyển đổi toàn diện ứng dụng "Vui Học Cùng Cô" sang mô hình kết hợp tối ưu:
-- **Cloudflare Pages**: Phục vụ giao diện người dùng React 19 + Vite siêu tốc qua mạng lưới máy chủ biên Edge tại Việt Nam (Hà Nội, TP.HCM), miễn phí không giới hạn băng thông, không bao giờ bị tạm dừng (ngủ đông).
-- **Supabase**: Quản lý đăng ký/đăng nhập giáo viên (Supabase Auth), lưu trữ các trò chơi và lịch sử thi đua (PostgreSQL Database), và đồng bộ phòng chơi thời gian thực (Supabase Realtime Channels: Broadcast & Presence).
+Xây dựng hệ thống phân quyền người dùng chuyên nghiệp cho nền tảng giáo dục mầm non **"Vui Học Cùng Cô"**, hỗ trợ 4 phân quyền rõ ràng: Quản trị viên (Admin), Giáo viên tiêu chuẩn (Member), Giáo viên cao cấp (Premium) và Học sinh tham gia tự do (Guest).
 
 ---
 
-## User Review Required
+## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> ### 1. Tính độc lập & Linh hoạt cao
-> - **Chế độ Hai tầng (Dual-mode Offline / Online)**: Khi chưa cấu hình Supabase (hoặc khi không có internet), ứng dụng vẫn hoạt động 100% bình thường trên trình duyệt nhờ cơ chế lưu trữ đệm sẵn có (IndexedDB & LocalStorage).
-> - Khi cô giáo đăng nhập tài khoản Supabase: Hệ thống tự động đồng bộ tất cả trò chơi lên cơ sở dữ liệu đám mây để mở trên mọi thiết bị khác.
->
-> ### 2. Các thông tin cần chuẩn bị trên Supabase (Hoàn toàn miễn phí 0đ)
-> Sau khi cài đặt xong mã nguồn, cô chỉ cần tạo 1 Project miễn phí trên [supabase.com](https://supabase.com) và lấy 2 giá trị đưa vào biến môi trường:
-> - `VITE_SUPABASE_URL`: Đường dẫn URL dự án (VD: `https://xyzcompany.supabase.co`)
-> - `VITE_SUPABASE_ANON_KEY`: Khóa công khai `anon public` của dự án.
+> ### Hạn ngạch & Quyền hạn đã cập nhật theo yêu cầu
+> 1. **Phân cấp Hạn ngạch & Quyền hạn Giáo viên**:
+>    - **Giáo viên Member (Tài khoản tiêu chuẩn)**:
+>      - Giới hạn tối đa **20 câu hỏi / bộ đề**.
+>      - Tạo tối đa **2 phòng chơi cùng lúc**.
+>      - Xuất kết quả thi đấu **cơ bản** (danh sách xếp hạng và tổng điểm của các đội/bé).
+>      - Tùy chọn quyền riêng tư: Riêng tư (Private) hoặc Gửi yêu cầu Admin duyệt công khai (Request Public).
+>    - **Giáo viên Premium (Tài khoản cao cấp - VIP)**:
+>      - **Không giới hạn** số câu hỏi trên mỗi bộ đề.
+>      - **Không giới hạn** số phòng chơi cùng lúc.
+>      - Xuất báo cáo thi đấu **nâng cao** (phân tích chi tiết từng câu hỏi, thống kê thời gian phản hồi, tải toàn bộ hình vẽ bài thi của học sinh dạng file nén ZIP / file Excel đầy đủ bảng biểu).
+>      - Huy hiệu VIP Hoàng kim nổi bật và quyền truy cập kho câu hỏi Premium độc quyền.
+>    - **Quản trị viên (Admin)**:
+>      - Quản lý danh sách tài khoản giáo viên (nâng cấp/hạ cấp Member $\leftrightarrow$ Premium $\leftrightarrow$ Admin, khóa/mở tài khoản).
+>      - Duyệt các yêu cầu công khai bộ câu hỏi trước khi hiển thị ra toàn website.
+>      - Quản lý ngân hàng câu hỏi gốc của hệ thống.
+>      - Email `tranthangit2025@gmail.com` tự động được định danh và cấp quyền Admin cao nhất.
+>    - **Học sinh (Khách)**:
+>      - **100% không yêu cầu đăng ký hay đăng nhập**. Ô nhập mã PIN tham gia trò chơi luôn hiển thị nổi bật và sẵn sàng ở trang chủ.
+> 2. **Phương thức Đăng ký & Đăng nhập**: Email và Mật khẩu cho Giáo viên và Admin (có sẵn tài khoản Admin mẫu để kiểm thử ngay lập tức).
 
 ---
 
-## Proposed Changes
+## 1. Overview & Core Concept
 
-### Nhóm 1: Thư viện & Cấu hình Kết nối Supabase
-
-#### [MODIFY] `package.json`
-- Cài đặt thư viện chính thức: `@supabase/supabase-js`.
-
-#### [NEW] `src/services/supabase.ts`
-- Khởi tạo `supabase` client an toàn từ `import.meta.env.VITE_SUPABASE_URL` và `import.meta.env.VITE_SUPABASE_ANON_KEY`.
-- Cung cấp hàm kiểm tra trạng thái cấu hình (`isSupabaseConfigured()`) để ứng dụng chuyển đổi nhịp nhàng giữa chế độ Local và Cloud.
-
-#### [NEW] `supabase_schema.sql`
-- Kịch bản SQL hoàn chỉnh để tạo:
-  - Bảng `games`: `id`, `user_id` (liên kết với `auth.users`), `title`, `description`, `cover_image`, `type`, `questions` (JSONB), `settings` (JSONB), `created_at`, `updated_at`.
-  - Bảng `game_history`: Lưu báo cáo kết quả và bảng xếp hạng các lượt chơi của lớp.
-  - Chính sách phân quyền bảo mật **Row Level Security (RLS)**: Giáo viên chỉ có quyền chỉnh sửa/xóa bài của mình; học sinh được phép đọc thông tin câu hỏi khi có mã phòng.
+- **Mục tiêu**: Cung cấp cấu trúc quản lý bảo mật, phân định rõ ràng giữa người quản trị hệ thống, giáo viên tiêu chuẩn (giới hạn 20 câu & 2 phòng), giáo viên VIP (không giới hạn) và trẻ mầm non tham gia trò chơi.
+- **Đối tượng người dùng**:
+  1. `admin` (Quản trị viên): Giám sát hệ sinh thái, phê duyệt nội dung công khai, phân quyền tài khoản giáo viên.
+  2. `teacher_member` (Giáo viên Member): Giáo viên đứng lớp tạo tối đa 2 phòng chơi cùng lúc, biên soạn tối đa 20 câu hỏi/bộ, xuất bảng điểm cơ bản.
+  3. `teacher_premium` (Giáo viên Premium): Tài khoản VIP không giới hạn câu hỏi/phòng chơi, xuất báo cáo nâng cao và truy cập tài nguyên chuyên sâu.
+  4. `student` (Học sinh / Khách): Tham gia trò chơi chỉ với mã PIN và tên đội/bé, không cần tài khoản.
 
 ---
 
-### Nhóm 2: Hệ thống Xác thực Giáo viên (Teacher Auth)
+## 2. User Experience & Visual Design
 
-#### [NEW] `src/context/AuthContext.tsx`
-- Tạo React Context quản lý phiên đăng nhập:
-  - `user`: Thông tin giáo viên (`id`, `email`, `user_metadata`).
-  - `session`: Phiên làm việc Supabase Auth.
-  - Các hàm tiện ích: `signUp(email, password, fullName)`, `signIn(email, password)`, `signOut()`, `resetPassword(email)`.
+### A. Luồng trải nghiệm người dùng
 
-#### [NEW] `src/components/auth/TeacherAuthModal.tsx`
-- Hộp thoại đăng nhập & đăng ký được thiết kế chuẩn sư phạm mầm non:
-  - Đăng nhập / Đăng ký qua Email & Mật khẩu.
-  - Hiển thị thông báo tiếng Việt thân thiện, rõ ràng khi sai mật khẩu hoặc đăng ký thành công.
-  - Chức năng quên mật khẩu và ẩn/hiện mật khẩu an toàn.
+1. **Học sinh (Không cần tài khoản)**:
+   - Truy cập trang chủ $\rightarrow$ Thấy ngay nút lớn **"Tham gia phòng"** hoặc ô nhập mã PIN $\rightarrow$ Nhập 6 chữ số $\rightarrow$ Vào chơi ngay lập tức.
+2. **Giáo viên Đăng ký & Đăng nhập**:
+   - Bấm nút **"Tài khoản"** trên thanh tiêu đề $\rightarrow$ Mở hộp thoại Đăng nhập/Đăng ký chuẩn mực (Email, Mật khẩu, Họ tên, Trường học).
+   - Sau khi đăng nhập: Hiển thị Avatar, tên cô giáo và huy hiệu tương ứng (`Thành viên` hoặc `VIP Premium`).
+3. **Quản lý Bộ câu hỏi & Kiểm soát Hạn ngạch (Quota Enforcement)**:
+   - Khi tài khoản `Member` tạo câu hỏi: Hệ thống hiển thị thanh đếm số câu hiện tại (VD: `14/20 câu`). Khi đạt tới 20 câu, hiển thị gợi ý thân thiện nâng cấp Premium nếu muốn thêm câu hỏi.
+   - Khi tài khoản `Member` mở phòng chơi: Đếm số phòng đang mở (tối đa 2 phòng). Nếu đạt tối đa 2 phòng, nhắc nhở đóng phòng đang mở trước hoặc nâng cấp VIP.
+   - Khi lưu bộ đề: Cho phép chọn **"Riêng tư"** hoặc **"Yêu cầu công khai"** (chuyển sang trạng thái `Chờ duyệt`).
+4. **Bảng điều khiển Quản trị (Admin Dashboard)**:
+   - Khi tài khoản mang quyền `admin` (hoặc email `tranthangit2025@gmail.com`), xuất hiện nút **"Quản trị hệ thống"** trên Header.
+   - **Tab 1: Quản lý Giáo viên**: Danh sách tất cả giáo viên đăng ký, ngày tham gia, vai trò, số bộ đề đã tạo, nút chuyển đổi quyền hạn (`Member` $\leftrightarrow$ `Premium` $\leftrightarrow$ `Admin`), và nút khóa/mở tài khoản.
+   - **Tab 2: Duyệt Bộ câu hỏi**: Danh sách các bộ đề chờ duyệt với đầy đủ câu hỏi, hình ảnh; nút **"Phê duyệt"** (đưa lên trang chủ) hoặc **"Từ chối"** kèm lý do phản hồi.
 
-#### [MODIFY] `src/components/common/Header.tsx`
-- Tích hợp nút **"Đăng nhập Giáo viên"** (hoặc hiển thị tên/email cô giáo kèm nút Đăng xuất khi đã đăng nhập) ngay trên thanh tiêu đề ứng dụng.
+### B. Thiết kế Trực quan & Bảng màu (Theme & Palette)
 
----
-
-### Nhóm 3: Đồng bộ Dữ liệu Trò chơi (Cloud Sync)
-
-#### [MODIFY] `src/services/gameStorage.ts`
-- Cập nhật hàm `saveGame`:
-  - Lưu vào `IndexedDB` & `localStorage` ngay tức thì (đảm bảo không bị giật lag).
-  - Nếu đã đăng nhập Supabase: Đồng thời gửi lệnh lưu lên bảng `games` của Supabase.
-- Cập nhật hàm tải dữ liệu `asyncHydrateFromPersistentStores`:
-  - Tự động lấy danh sách trò chơi đám mây của cô giáo về máy khi mở ứng dụng trên máy tính/laptop mới.
-- Hỗ trợ thùng rác đám mây (`moveToTrash`, `restoreFromTrash`) đồng bộ 2 chiều.
-
----
-
-### Nhóm 4: Chuyển đổi Phòng chơi Thời gian thực sang Supabase Realtime Channels
-
-#### [MODIFY] `src/services/realtimeClient.ts`
-- Bổ sung adapter **Supabase Realtime Channels** (`room:${roomCode}`):
-  - **Presence tracking**: Khi học sinh mở máy tính bảng chọn đội, Supabase tự động theo dõi danh sách các đội đang online mà không cần máy chủ Node.js trung gian.
-  - **Broadcast events**:
-    - Máy cô giáo phát lệnh: `host:start_game`, `host:next_question`, `host:end_question`, `host:grade_open_ended`.
-    - Máy học sinh gửi: `player:submit_answer`, `player:buzz`.
-  - Hỗ trợ chế độ kép: Tự động dùng Supabase Realtime khi có cấu hình, hoặc dùng WebSocket cục bộ khi phát triển trên máy lập trình.
+- **Ngôn ngữ thiết kế**: Phong cách giáo dục mầm non tươi sáng, thân thiện và ấm áp.
+- **Hệ thống nhận diện vai trò (Zero-Pill Typography & Badges)**:
+  - `Admin`: Đỏ cam uy tín (`#DC2626`), biểu tượng Vương miện / Khiên quản trị.
+  - `Premium`: Vàng ánh kim sang trọng (`#D97706`), huy hiệu Ngôi sao VIP lấp lánh.
+  - `Member`: Xanh dương thanh lịch (`#2563EB`), biểu tượng Sách giáo án / Bút hoa.
+  - `Học sinh`: Xanh ngọc rạng rỡ (`#059669`), biểu tượng Nụ cười mặt trời.
+- **Không gian bảng điều khiển**: Tối ưu chuẩn desktop 1440px, bố cục rõ ràng, bảng biểu số liệu căn chỉnh chuẩn (`tabular-nums`), tương thích mượt mà trên iPad/máy tính bảng cô giáo.
 
 ---
 
-### Nhóm 5: Cấu hình Triển khai Chuẩn Cloudflare Pages
+## 3. Key Product Decisions & Trade-Offs
 
-#### [NEW] `public/_routes.json`
-- Cấu hình tệp điều hướng cho Cloudflare Pages để mọi URL con (`/host`, `/player`, `/history`) luôn điều hướng chính xác về `index.html` của React SPA mà không bị lỗi 404 khi người dùng tải lại trang (F5).
+### Quyết định 1: Thiết lập Hạn ngạch Rõ ràng cho Member vs. Premium
+- **Hạn ngạch Member**:
+  - Số câu hỏi mỗi bộ đề: $\le 20$ câu (phù hợp trọn vẹn cho 1 tiết học mầm non tiêu chuẩn 15-20 phút).
+  - Số phòng chơi đồng thời: $\le 2$ phòng (1 phòng chính và 1 phòng dự phòng/nhóm).
+  - Báo cáo kết quả: Xuất bảng xếp hạng và điểm số cơ bản.
+- **Đặc quyền Premium**:
+  - Không giới hạn số câu hỏi, không giới hạn số phòng đồng thời.
+  - Xuất báo cáo nâng cao (phân tích từng câu, tải ảnh bài vẽ dạng ZIP).
+- **Lý do**: Tạo sự cân bằng lý tưởng: Member hoàn toàn đủ dùng cho tiết học hàng ngày, trong khi các tính năng nâng cao và quy mô lớn dành cho tài khoản VIP Premium.
 
-#### [NEW] `wrangler.toml`
-- Tệp cấu hình chuẩn của Cloudflare, hỗ trợ lệnh build `npm run build` và thư mục xuất bản `dist`.
+### Quyết định 2: Cơ chế Lưu trữ & Xác thực Độc lập Đa Tầng (Hybrid Offline/Online)
+- **Giải pháp**: Xây dựng tầng Auth Service tích hợp:
+  - Hỗ trợ lưu trữ cục bộ (`localStorage` + `IndexedDB`) với đầy đủ tính năng mã hóa, duy trì phiên đăng nhập và ghi nhớ vai trò người dùng ngay cả khi không có kết nối Supabase Cloud.
+  - Nếu đã cấu hình Supabase Cloud (`VITE_SUPABASE_URL`), hệ thống tự động đồng bộ tài khoản người dùng và vai trò qua `user_metadata` hoặc bảng `user_profiles`.
 
-#### [NEW] `HUONG_DAN_CLOUDFLARE_SUPABASE.md`
-- Hướng dẫn chi tiết bằng tiếng Việt có hình ảnh/bước làm cụ thể:
-  1. Hướng dẫn tạo tài khoản và Project trên Supabase (0đ) & copy file SQL.
-  2. Hướng dẫn kết nối GitHub với Cloudflare Pages.
-  3. Cài đặt biến môi trường `VITE_SUPABASE_URL` và `VITE_SUPABASE_ANON_KEY` trên Cloudflare Pages.
+### Quyết định 3: Tự động Gán Quyền Admin cho Email Chủ sở hữu
+- **Giải pháp**: Bất kỳ khi nào email `tranthangit2025@gmail.com` đăng ký hoặc đăng nhập, hệ thống tự động nâng cấp vai trò thành `admin` vĩnh viễn.
 
 ---
 
-## Verification Plan
+## 4. Technical Architecture & Data Strategy
 
-### Kiểm tra tự động
-- Chạy `npm run build`: Tạo thư mục `dist/` độc lập, tối ưu hóa CSS & JS cho môi trường CDN.
-- Chạy `tsc --noEmit` và `npm run lint`: Đảm bảo 0 lỗi kiểu dữ liệu (TypeScript).
+### A. Sơ đồ Kiến trúc & Phân quyền Hệ thống
 
-### Kiểm tra chức năng thực tế
-1. **Kiểm tra Giao diện Xác thực**: Bấm nút Đăng nhập trên Header, kiểm tra modal đăng nhập/đăng ký hoạt động mượt mà.
-2. **Kiểm tra Lưu trữ & Đồng bộ**: Thử tạo 1 bộ câu hỏi trắc nghiệm và 1 câu vẽ hình, kiểm tra trò chơi được lưu và hiển thị trong danh sách.
-3. **Kiểm tra Tương tác Phòng chơi**: Tạo phòng thi đấu và cho thiết bị học sinh tham gia bằng mã PIN, kiểm tra tín hiệu trả lời câu hỏi và chấm điểm đồng bộ tức thì.
-4. **Kiểm tra Đóng gói Cloudflare**: Kiểm tra các tệp cấu hình `_routes.json`, `wrangler.toml` đạt chuẩn quy cách của Cloudflare Pages.
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        VUI HỌC CÙNG CÔ PLATFORM                         │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+           ┌────────────────────────┼────────────────────────┐
+           ▼                        ▼                        ▼
+ ┌───────────────────┐    ┌───────────────────┐    ┌───────────────────┐
+ │   HỌC SINH (GUEST)│    │ GIÁO VIÊN (MEMBER)│    │ QUẢN TRỊ (ADMIN)  │
+ │ - Zero Auth       │    │ & TEACHER PREMIUM │    │                   │
+ │ - Nhập PIN 6 số   │    │ - Đăng ký / Login │    │ - Dashboard Admin │
+ │ - Trả lời / Vẽ thi│    │ - Member: <=20 câu│    │ - Quản lý Giáo viên│
+ │ - Xem bảng xếp hạng│   │   <=2 phòng chơi  │    │   (Member<->VIP)  │
+ └───────────────────┘    │ - Premium: Không  │    │ - Phê duyệt đề thi│
+                          │   giới hạn + B/cáo│    │ - Quản lý đề gốc  │
+                          └─────────┬─────────┘    └─────────┬─────────┘
+                                    │                        │
+                                    ▼                        ▼
+                          ┌────────────────────────────────────┐
+                          │         AuthContext & RBAC         │
+                          │  (Role, CurrentUser, Permissions)  │
+                          └─────────────────┬──────────────────┘
+                                            │
+                       ┌────────────────────┴────────────────────┐
+                       ▼                                         ▼
+            ┌──────────────────────┐                  ┌──────────────────────┐
+            │   GameStorage & DB   │                  │   Supabase Cloud     │
+            │ (Local & IndexedDB)  │                  │  (Khi có cấu hình)   │
+            │ - questions_library  │                  │ - user_profiles (RLS)│
+            │ - pending_approvals  │                  │ - games / history    │
+            │ - teacher_accounts   │                  └──────────────────────┘
+            └──────────────────────┘
+```
+
+### B. Cấu trúc Mô hình Dữ liệu (TypeScript Entities)
+
+1. **User Role & Profile**:
+   ```typescript
+   export type UserRole = 'admin' | 'teacher_member' | 'teacher_premium' | 'student';
+
+   export interface UserQuota {
+     maxQuestionsPerGame: number; // 20 cho Member, Infinity cho Premium/Admin
+     maxActiveRooms: number;       // 2 cho Member, Infinity cho Premium/Admin
+     canExportAdvancedReport: boolean;
+     hasVipBadge: boolean;
+   }
+
+   export interface UserProfile {
+     id: string;
+     email: string;
+     fullName: string;
+     schoolName?: string;
+     role: UserRole;
+     status: 'active' | 'suspended';
+     createdAt: number;
+     lastLoginAt: number;
+     createdGamesCount: number;
+   }
+   ```
+
+2. **Question Set Visibility & Approval**:
+   ```typescript
+   export type GameVisibility = 'private' | 'pending_approval' | 'public';
+
+   export interface Game {
+     // ... các thuộc tính game hiện tại
+     authorId?: string;
+     authorName?: string;
+     authorEmail?: string;
+     visibility: GameVisibility; // 'private' | 'pending_approval' | 'public'
+     submittedForApprovalAt?: number;
+     approvedAt?: number;
+     approvedBy?: string;
+     rejectionReason?: string;
+     isSystemDefault?: boolean; // Bộ đề chuẩn của website do Admin quản lý
+   }
+   ```
+
+### C. Các luồng tương tác và kiểm soát hạn ngạch
+
+1. **Kiểm tra Hạn ngạch khi Tạo Câu Hỏi (Builder)**:
+   - Giáo viên Member thêm câu hỏi thứ 21 $\rightarrow$ Hiển thị thông báo thân thiện: *"Tài khoản Member hỗ trợ tối đa 20 câu hỏi/bộ đề. Nâng cấp Premium để tạo không giới hạn câu hỏi!"*.
+2. **Kiểm tra Hạn ngạch khi Mở Phòng (Host)**:
+   - Giáo viên Member mở phòng thứ 3 $\rightarrow$ Thông báo đóng bớt 1 trong 2 phòng đang mở trước hoặc nâng cấp VIP.
+3. **Giao diện Admin Dashboard**:
+   - Tab Quản lý Giáo viên: Xem danh sách tài khoản, chuyển đổi quyền `Member` $\leftrightarrow$ `Premium` $\leftrightarrow$ `Admin`, khóa/kích hoạt tài khoản.
+   - Tab Duyệt Bộ Đề: Xem trước chi tiết bộ đề chờ duyệt $\rightarrow$ Bấm **Phê duyệt** (công khai toàn website) hoặc **Từ chối** kèm lý do.
+4. **Học sinh tham gia**:
+   - Mở trang chủ $\rightarrow$ Nhập PIN 6 số $\rightarrow$ Tham gia thi đấu tức thì, không bị yêu cầu đăng nhập.
+
+---
+
+## Verification & Testing Plan
+
+1. **Kiểm thử Giới hạn Hạn ngạch Member (20 câu, 2 phòng)**:
+   - Thử thêm câu hỏi trong Game Builder với tài khoản Member để kiểm tra giới hạn 20 câu và thanh đếm số câu hỏi (`x/20 câu`).
+   - Kiểm tra giới hạn 2 phòng chơi cùng lúc và tính năng xuất kết quả cơ bản.
+2. **Kiểm thử Tài khoản Premium**:
+   - Kiểm tra biểu tượng VIP trên Header, tạo trên 20 câu hỏi thành công, xuất báo cáo thi đấu nâng cao.
+3. **Kiểm thử Tài khoản Admin**:
+   - Đăng nhập với `tranthangit2025@gmail.com` $\rightarrow$ Truy cập Admin Dashboard $\rightarrow$ Nâng/hạ quyền giáo viên $\rightarrow$ Phê duyệt bộ đề gửi lên.
+4. **Kiểm thử Trải nghiệm Học sinh**:
+   - Mở màn hình tham gia phòng bằng mã PIN $\rightarrow$ Xác nhận không có bất kỳ rào cản đăng nhập nào.
+5. **Kiểm tra Biên dịch & Không có lỗi**:
+   - Chạy `compile_applet` để xác thực toàn bộ TypeScript và Component không có lỗi build.

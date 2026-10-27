@@ -21,6 +21,8 @@ export interface GameHistoryRecord {
   questionsCount: number;
   winnerTeamName: string;
   winnerScore: number;
+  teacherEmail?: string;
+  teacherName?: string;
 }
 
 // In-memory cache
@@ -521,6 +523,16 @@ export function saveGame(game: Game): void {
     });
   }
 
+  // Default visibility and system default flag
+  if (!game.visibility) {
+    if (game.isSystemDefault || DEFAULT_GAMES.some(d => d.id === game.id)) {
+      game.visibility = 'public';
+      game.isSystemDefault = true;
+    } else {
+      game.visibility = 'private';
+    }
+  }
+
   const index = cachedGames.findIndex(g => g.id === game.id);
   if (index >= 0) {
     cachedGames[index] = game;
@@ -815,3 +827,151 @@ export function toggleFavoriteGameId(gameId: string): boolean {
     return false;
   }
 }
+
+// ----------------------------------------------------
+// RBAC VISIBILITY & PUBLIC APPROVAL QUEUE METHODS
+// ----------------------------------------------------
+
+/**
+ * Submit a game for admin approval to be published publicly site-wide
+ */
+export function submitGameForApproval(
+  gameId: string,
+  authorInfo?: { id?: string; name?: string; email?: string }
+): Game | null {
+  const game = getGameById(gameId);
+  if (!game) return null;
+
+  const updated: Game = {
+    ...game,
+    visibility: 'pending_approval',
+    submittedForApprovalAt: Date.now(),
+    authorId: authorInfo?.id || game.authorId,
+    authorName: authorInfo?.name || game.authorName,
+    authorEmail: authorInfo?.email || game.authorEmail,
+  };
+
+  saveGame(updated);
+  return updated;
+}
+
+/**
+ * Admin approves a question set for public site-wide visibility
+ */
+export function approveGame(gameId: string, adminName: string = 'Quản trị viên'): Game | null {
+  const game = getGameById(gameId);
+  if (!game) return null;
+
+  const updated: Game = {
+    ...game,
+    visibility: 'public',
+    status: 'published',
+    approvedAt: Date.now(),
+    approvedBy: adminName,
+    rejectionReason: undefined,
+  };
+
+  saveGame(updated);
+  return updated;
+}
+
+/**
+ * Admin rejects a question set with an explanation note
+ */
+export function rejectGame(gameId: string, reason: string): Game | null {
+  const game = getGameById(gameId);
+  if (!game) return null;
+
+  const updated: Game = {
+    ...game,
+    visibility: 'private',
+    rejectionReason: reason || 'Nội dung chưa đạt tiêu chuẩn kiểm duyệt.',
+  };
+
+  saveGame(updated);
+  return updated;
+}
+
+/**
+ * Get all games currently waiting for admin approval
+ */
+export function getPendingApprovalGames(): Game[] {
+  return getAllGames().filter(g => g.visibility === 'pending_approval');
+}
+
+/**
+ * Get all public games (including approved and system defaults)
+ */
+export function getPublicGames(): Game[] {
+  return getAllGames().filter(g => g.visibility === 'public' || g.isSystemDefault || DEFAULT_GAMES.some(d => d.id === g.id));
+}
+
+/**
+ * Get games owned by a specific teacher or user email
+ */
+export function getMyGames(userEmailOrId?: string): Game[] {
+  if (!userEmailOrId) return [];
+  const normalized = userEmailOrId.toLowerCase();
+  return getAllGames().filter(g => 
+    (g.authorEmail && g.authorEmail.toLowerCase() === normalized) ||
+    (g.authorId && g.authorId === userEmailOrId)
+  );
+}
+
+// ----------------------------------------------------
+// ACTIVE ROOMS TRACKING FOR QUOTA ENFORCEMENT
+// (Member: Max 2 rooms; Premium/Admin: Unlimited)
+// ----------------------------------------------------
+const ACTIVE_ROOMS_KEY = 'vuihoc_active_rooms_v1';
+
+interface ActiveRoomEntry {
+  roomCode: string;
+  gameId: string;
+  teacherEmail?: string;
+  createdAt: number;
+}
+
+export function getActiveRooms(): ActiveRoomEntry[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(ACTIVE_ROOMS_KEY);
+    if (!raw) return [];
+    const parsed: ActiveRoomEntry[] = JSON.parse(raw);
+    // Auto-expire rooms older than 6 hours
+    const now = Date.now();
+    const valid = parsed.filter(r => now - r.createdAt < 6 * 60 * 60 * 1000);
+    return valid;
+  } catch {
+    return [];
+  }
+}
+
+export function getTeacherActiveRoomCount(teacherEmail?: string): number {
+  if (!teacherEmail) return 0;
+  const rooms = getActiveRooms();
+  const normalized = teacherEmail.toLowerCase();
+  return rooms.filter(r => r.teacherEmail && r.teacherEmail.toLowerCase() === normalized).length;
+}
+
+export function registerActiveRoom(roomCode: string, gameId: string, teacherEmail?: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const rooms = getActiveRooms().filter(r => r.roomCode !== roomCode);
+    rooms.push({
+      roomCode,
+      gameId,
+      teacherEmail,
+      createdAt: Date.now(),
+    });
+    localStorage.setItem(ACTIVE_ROOMS_KEY, JSON.stringify(rooms));
+  } catch {}
+}
+
+export function closeActiveRoom(roomCode: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const rooms = getActiveRooms().filter(r => r.roomCode !== roomCode);
+    localStorage.setItem(ACTIVE_ROOMS_KEY, JSON.stringify(rooms));
+  } catch {}
+}
+
