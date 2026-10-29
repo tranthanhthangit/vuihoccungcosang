@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState, useMemo, useCall
 import type { User, Session } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../services/supabase';
 import { UserProfile, UserRole, UserQuota } from '../types/game';
+import { refreshGamesFromServer } from '../services/gameStorage';
 
 const USERS_STORAGE_KEY = 'vuihoc_registered_users_v2';
 const CURRENT_USER_KEY = 'vuihoc_current_user_v2';
@@ -193,6 +194,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
         localStorage.removeItem(CURRENT_USER_KEY);
       }
+      refreshGamesFromServer();
     } catch (e) {
       console.warn('[Auth] Error saving current user:', e);
     }
@@ -208,28 +210,64 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
-      if (session?.user?.email) {
+      if (session?.user?.email && supabase) {
         const email = session.user.email.toLowerCase();
-        // Link with local profile
-        setRegisteredUsers(prev => {
-          let matched = prev.find(u => u.email.toLowerCase() === email);
-          if (!matched) {
-            const isOwner = email === OWNER_ADMIN_EMAIL.toLowerCase();
-            matched = {
-              id: session.user.id,
-              email: session.user.email!,
-              fullName: session.user.user_metadata?.full_name || 'Cô giáo',
-              schoolName: session.user.user_metadata?.school_name || 'Trường Mầm Non',
-              role: isOwner ? 'admin' : 'teacher_member',
-              status: 'active',
-              createdAt: Date.now(),
-              lastLoginAt: Date.now(),
-              createdGamesCount: 0,
-            };
-            return [...prev, matched];
-          }
-          return prev;
-        });
+        // Link with local profile and Supabase profiles table
+        supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .maybeSingle()
+          .then(
+            ({ data: pData }) => {
+              setRegisteredUsers(prev => {
+                let matched = prev.find(u => u.email.toLowerCase() === email || u.id === session.user.id);
+                const isOwner = email === OWNER_ADMIN_EMAIL.toLowerCase();
+                const fullName = pData?.full_name || session.user.user_metadata?.full_name || matched?.fullName || 'Cô giáo';
+                const schoolName = pData?.school_name || session.user.user_metadata?.school_name || matched?.schoolName || 'Trường Mầm Non';
+                const role = isOwner ? 'admin' : (pData?.role || matched?.role || 'teacher_member');
+                const status = pData?.status || matched?.status || 'active';
+
+                const updatedProfile: UserProfile = {
+                  id: session.user.id,
+                  email: session.user.email!,
+                  fullName,
+                  schoolName,
+                  role,
+                  status,
+                  createdAt: pData?.created_at ? new Date(pData.created_at).getTime() : (matched?.createdAt || Date.now()),
+                  lastLoginAt: Date.now(),
+                  createdGamesCount: matched?.createdGamesCount || 0,
+                };
+
+                if (matched) {
+                  return prev.map(u => (u.id === updatedProfile.id || u.email.toLowerCase() === email) ? updatedProfile : u);
+                }
+                return [...prev, updatedProfile];
+              });
+            },
+            () => {
+              setRegisteredUsers(prev => {
+                let matched = prev.find(u => u.email.toLowerCase() === email);
+                if (!matched) {
+                  const isOwner = email === OWNER_ADMIN_EMAIL.toLowerCase();
+                  matched = {
+                    id: session.user.id,
+                    email: session.user.email!,
+                    fullName: session.user.user_metadata?.full_name || 'Cô giáo',
+                    schoolName: session.user.user_metadata?.school_name || 'Trường Mầm Non',
+                    role: isOwner ? 'admin' : 'teacher_member',
+                    status: 'active',
+                    createdAt: Date.now(),
+                    lastLoginAt: Date.now(),
+                    createdGamesCount: 0,
+                  };
+                  return [...prev, matched];
+                }
+                return prev;
+              });
+            }
+          );
       }
       setLoading(false);
     }).catch((err) => {
@@ -388,7 +426,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Try Supabase Auth if available
     if (supabase && configured) {
       try {
-        await supabase.auth.signUp({
+        const { data: authData } = await supabase.auth.signUp({
           email: trimmedEmail,
           password,
           options: {
@@ -399,6 +437,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             },
           },
         });
+        if (authData?.user) {
+          await supabase.from('profiles').upsert({
+            id: authData.user.id,
+            email: trimmedEmail,
+            full_name: newProfile.fullName,
+            school_name: newProfile.schoolName,
+            role: assignedRole,
+            status: 'active',
+            updated_at: new Date().toISOString(),
+          });
+        }
       } catch (err) {
         console.warn('[Auth] Supabase remote signup warning (proceeding local):', err);
       }
@@ -551,7 +600,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRegisteredUsers(prev => prev.map(u => u.id === currentUser.id ? updatedUser : u));
     setCurrentUser(updatedUser);
 
-    // If Supabase configured, update user metadata
+    // If Supabase configured, update user metadata and public.profiles
     if (supabase && configured) {
       try {
         await supabase.auth.updateUser({
@@ -560,6 +609,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             full_name: trimmedName,
             school_name: data.schoolName?.trim() || '',
           },
+        });
+        await supabase.from('profiles').upsert({
+          id: currentUser.id,
+          email: trimmedEmail,
+          full_name: trimmedName,
+          school_name: data.schoolName?.trim() || '',
+          role: updatedUser.role,
+          status: updatedUser.status,
+          updated_at: new Date().toISOString(),
         });
       } catch (err: any) {
         console.warn('[Auth] Remote Supabase profile update error:', err);

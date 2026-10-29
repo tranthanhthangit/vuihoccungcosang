@@ -2585,15 +2585,19 @@ app.get('/api/games/custom', (req: Request, res: Response) => {
 
     // Secure privacy filtering: Exclude private and pending games from unauthenticated users or non-authors
     games = games.filter(g => {
-      // If public or system default, anyone can see
+      // 1. If public or system default, anyone can see
       if (g.visibility === 'public' || g.isSystemDefault) {
         return true;
       }
-      // If author is logged in, author can see their own games
+      // 2. If author is logged in, author can see their own games
       if (userEmail && g.authorEmail && g.authorEmail.toLowerCase() === userEmail) {
         return true;
       }
       if (userId && g.authorId && g.authorId === userId) {
+        return true;
+      }
+      // 3. If game has no author specified, allow access so custom teacher games are never lost
+      if (!g.authorEmail && !g.authorId) {
         return true;
       }
       // Otherwise strictly hide
@@ -2612,9 +2616,22 @@ app.post('/api/games/custom', (req: Request, res: Response) => {
     if (!game || !game.id) {
       return res.status(400).json({ error: 'Missing game or game.id' });
     }
+
+    const queryEmail = (req.query.userEmail as string || '').trim().toLowerCase();
+    if (!game.authorEmail && queryEmail) {
+      game.authorEmail = queryEmail;
+    }
+
     const games = readCustomGames();
     const idx = games.findIndex(g => g.id === game.id);
     if (idx >= 0) {
+      // Preserve existing author info if client didn't supply it
+      if (!game.authorEmail && games[idx].authorEmail) {
+        game.authorEmail = games[idx].authorEmail;
+      }
+      if (!game.authorId && games[idx].authorId) {
+        game.authorId = games[idx].authorId;
+      }
       games[idx] = game;
     } else {
       games.unshift(game);

@@ -52,6 +52,7 @@ import {
   saveInteractiveQuestion,
 } from '../../services/interactiveQuestionStorage';
 import { InteractiveGameBuilder } from './InteractiveGameBuilder';
+import { useAuth } from '../../context/AuthContext';
 
 // High quality preschool background wallpapers
 const PRESET_WALLPAPERS = [
@@ -111,6 +112,8 @@ export const CustomGameBuilder: React.FC<CustomGameBuilderProps> = ({
   onSaveAndExit,
   onCancel,
 }) => {
+  const { currentUser, isAdmin } = useAuth();
+
   // Game metadata
   const [gameTitle, setGameTitle] = useState<string>(
     initialGame?.title || 'TRÒ CHƠI TÙY CHỌN CHO BÉ'
@@ -516,6 +519,10 @@ export const CustomGameBuilder: React.FC<CustomGameBuilderProps> = ({
       createdAt: initialGame?.createdAt || Date.now(),
       updatedAt: Date.now(),
       playCount: initialGame?.playCount || 0,
+      authorId: currentUser?.id || initialGame?.authorId,
+      authorName: currentUser?.fullName || initialGame?.authorName || 'Cô giáo mầm non',
+      authorEmail: currentUser?.email || initialGame?.authorEmail,
+      visibility: initialGame?.visibility || (isAdmin ? 'public' : 'private'),
       questions,
       settings: {
         timePerQuestion: 0,

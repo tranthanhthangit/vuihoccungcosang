@@ -364,12 +364,32 @@ async function asyncHydrateFromPersistentStores(): Promise<void> {
           const trashIds = new Set(cachedTrash.map(g => g.id));
           serverGames.forEach(sg => {
             if (!trashIds.has(sg.id) && !cachedPurgedDefaultIds.has(sg.id)) {
-              const existing = cachedGames.find(g => g.id === sg.id);
-              if (!existing || !existing.questions?.[0]?.htmlContent) {
-                cachedGames = cachedGames.filter(g => g.id !== sg.id);
+              const existingIdx = cachedGames.findIndex(g => g.id === sg.id);
+              if (existingIdx === -1) {
                 cachedGames.push(sg);
                 idbSaveGame(sg);
                 hasChanges = true;
+              } else {
+                const existing = cachedGames[existingIdx];
+                let itemUpdated = false;
+                if (!existing.authorEmail && sg.authorEmail) {
+                  existing.authorEmail = sg.authorEmail;
+                  existing.authorId = sg.authorId || existing.authorId;
+                  existing.authorName = sg.authorName || existing.authorName;
+                  itemUpdated = true;
+                }
+                if (sg.visibility && existing.visibility !== sg.visibility) {
+                  existing.visibility = sg.visibility;
+                  itemUpdated = true;
+                }
+                if (!existing.questions?.[0]?.htmlContent && sg.questions?.[0]?.htmlContent) {
+                  cachedGames[existingIdx] = sg;
+                  itemUpdated = true;
+                }
+                if (itemUpdated) {
+                  idbSaveGame(cachedGames[existingIdx]);
+                  hasChanges = true;
+                }
               }
             }
           });
@@ -396,31 +416,84 @@ async function asyncHydrateFromPersistentStores(): Promise<void> {
                 id: cg.id,
                 title: cg.title,
                 description: cg.description || '',
-                theme: cg.theme || 'default',
-                category: cg.category || 'default',
+                theme: cg.settings?.theme || cg.theme || 'default',
+                category: cg.settings?.category || cg.category || 'default',
+                targetAge: cg.settings?.targetAge || '5-6 tuổi',
                 coverImage: cg.cover_image || undefined,
                 gameType: cg.type || 'multiple_choice',
                 questions: cg.questions || [],
                 settings: cg.settings || { timePerQuestion: 30, speedBonus: true, maxTeams: 12, soundEffects: true },
                 createdAt: cg.created_at ? new Date(cg.created_at).getTime() : Date.now(),
                 playCount: cg.play_count || 0,
+                authorId: cg.user_id || cg.settings?.authorId,
+                authorEmail: cg.settings?.authorEmail,
+                authorName: cg.settings?.authorName,
+                visibility: cg.is_public ? 'public' : 'private',
+                gameUrl: cg.settings?.gameUrl,
+                isCustomHtml: cg.settings?.isCustomHtml,
+                isZipArchive: cg.settings?.isZipArchive,
               };
 
               const existingIdx = cachedGames.findIndex(g => g.id === cg.id);
               if (existingIdx >= 0) {
-                // If local doesn't have custom questions but cloud does, overwrite
-                cachedGames[existingIdx] = cloudGame;
+                const existing = cachedGames[existingIdx];
+                cachedGames[existingIdx] = {
+                  ...cloudGame,
+                  questions: existing.questions && existing.questions[0]?.htmlContent
+                    ? existing.questions
+                    : cloudGame.questions,
+                };
               } else {
                 cachedGames.push(cloudGame);
               }
-              idbSaveGame(cloudGame);
+              idbSaveGame(cachedGames[existingIdx >= 0 ? existingIdx : cachedGames.length - 1]);
               hasChanges = true;
             }
           });
         }
-
       } catch (cloudErr) {
         console.warn('[Supabase] Hydration warning:', cloudErr);
+      }
+
+      // Also hydrate game_history from Supabase
+      try {
+        const { data: cloudHistory, error: historyErr } = await supabase
+          .from('game_history')
+          .select('*')
+          .order('date', { ascending: false })
+          .limit(50);
+
+        if (!historyErr && Array.isArray(cloudHistory) && cloudHistory.length > 0) {
+          const currentLocal = getGameHistory();
+          const localIds = new Set(currentLocal.map(h => h.id));
+          const newEntries: GameHistoryRecord[] = [];
+
+          cloudHistory.forEach((ch: any) => {
+            if (!localIds.has(ch.id)) {
+              newEntries.push({
+                id: ch.id,
+                gameTitle: ch.game_title,
+                roomCode: ch.room_code,
+                date: ch.date ? Number(ch.date) : (ch.created_at ? new Date(ch.created_at).getTime() : Date.now()),
+                teamsCount: ch.teams_count || 2,
+                questionsCount: ch.questions_count || 5,
+                winnerTeamName: ch.winner_team_name || 'Đội chiến thắng',
+                winnerScore: ch.winner_score || 0,
+                teacherEmail: ch.teams_summary?.teacherEmail,
+                teacherName: ch.teams_summary?.teacherName,
+              });
+            }
+          });
+
+          if (newEntries.length > 0) {
+            const merged = [...currentLocal, ...newEntries].sort((a, b) => b.date - a.date);
+            try {
+              localStorage.setItem('vuihoc_game_history', JSON.stringify(merged.slice(0, 50)));
+            } catch {}
+          }
+        }
+      } catch (histErr) {
+        console.warn('[Supabase] History hydration warning:', histErr);
       }
     }
 
@@ -443,6 +516,11 @@ if (typeof window !== 'undefined') {
     purgeExpiredTrash();
     asyncHydrateFromPersistentStores();
   }, 10);
+}
+
+export async function refreshGamesFromServer(): Promise<void> {
+  isIdbInitialized = false;
+  await asyncHydrateFromPersistentStores();
 }
 
 export function getAllGames(): Game[] {
@@ -487,15 +565,26 @@ async function syncGameToSupabase(game: Game) {
     const { data: { user } } = await supabase.auth.getUser();
     await supabase.from('games').upsert({
       id: game.id,
-      user_id: user?.id || null,
+      user_id: user?.id || (game.authorId && game.authorId.length === 36 ? game.authorId : null),
       title: game.title,
       description: game.description || '',
       cover_image: game.coverImage || null,
-      type: game.gameType || 'quiz',
+      type: game.gameType || 'multiple_choice',
       questions: game.questions || [],
-      settings: game.settings || { maxTeams: 12 },
-      is_public: true,
-      deleted_at: null,
+      settings: {
+        ...(game.settings || { maxTeams: 12 }),
+        category: game.category,
+        theme: game.theme,
+        targetAge: game.targetAge,
+        authorEmail: game.authorEmail,
+        authorName: game.authorName,
+        authorId: game.authorId,
+        gameUrl: game.gameUrl,
+        isCustomHtml: game.isCustomHtml,
+        isZipArchive: game.isZipArchive,
+      },
+      is_public: game.visibility === 'public' || Boolean(game.isSystemDefault),
+      deleted_at: game.deletedAt || null,
       updated_at: new Date().toISOString(),
     });
   } catch (err) {
@@ -551,11 +640,29 @@ export function saveGame(game: Game): void {
     });
   }
 
+  // Auto-populate author info from localStorage if missing
+  if (typeof window !== 'undefined' && (!game.authorEmail || !game.authorId)) {
+    try {
+      const rawUser = localStorage.getItem('vuihoc_current_user_v2');
+      if (rawUser) {
+        const u = JSON.parse(rawUser);
+        if (!game.authorEmail && u.email) game.authorEmail = u.email;
+        if (!game.authorId && u.id) game.authorId = u.id;
+        if (!game.authorName && (u.fullName || u.email)) game.authorName = u.fullName || u.email;
+        if (!game.visibility) {
+          game.visibility = (u.role === 'admin' || (u.email && u.email.toLowerCase() === 'tranthangit2025@gmail.com')) ? 'public' : 'private';
+        }
+      }
+    } catch {}
+  }
+
   // Default visibility and system default flag
   if (!game.visibility) {
     if (game.isSystemDefault || DEFAULT_GAMES.some(d => d.id === game.id)) {
       game.visibility = 'public';
       game.isSystemDefault = true;
+    } else if (!game.authorEmail && !game.authorId) {
+      game.visibility = 'public';
     } else {
       game.visibility = 'private';
     }
@@ -573,7 +680,11 @@ export function saveGame(game: Game): void {
   idbSaveGame(game);
 
   if (typeof fetch !== 'undefined') {
-    fetch('/api/games/custom', {
+    let customApiUrl = '/api/games/custom';
+    if (game.authorEmail) {
+      customApiUrl += `?userEmail=${encodeURIComponent(game.authorEmail)}`;
+    }
+    fetch(customApiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(game),
@@ -747,7 +858,7 @@ async function syncHistoryToSupabase(record: GameHistoryRecord) {
   if (!supabase || !isSupabaseConfigured()) return;
   try {
     const { data: { user } } = await supabase.auth.getUser();
-    await supabase.from('game_history').insert({
+    await supabase.from('game_history').upsert({
       id: record.id,
       room_code: record.roomCode,
       game_title: record.gameTitle,
@@ -756,7 +867,14 @@ async function syncHistoryToSupabase(record: GameHistoryRecord) {
       questions_count: record.questionsCount,
       winner_team_name: record.winnerTeamName,
       winner_score: record.winnerScore,
+      teams_summary: {
+        winnerTeamName: record.winnerTeamName,
+        winnerScore: record.winnerScore,
+        teacherEmail: record.teacherEmail,
+        teacherName: record.teacherName,
+      },
       created_by: user?.id || null,
+      created_at: new Date(record.date || Date.now()).toISOString(),
     });
   } catch (err) {
     console.warn('[Supabase] History sync error:', err);
@@ -1005,12 +1123,16 @@ export function isGameVisibleToUser(
 ): boolean {
   if (isAdmin) return true;
 
-  // If user is logged in and is the author of this game
+  // If user is logged in
   if (user) {
     const userEmail = (user.email || '').trim().toLowerCase();
     const userId = user.id;
     const authorEmail = (game.authorEmail || '').trim().toLowerCase();
     const authorId = game.authorId;
+
+    if (userEmail && userEmail === 'tranthangit2025@gmail.com') {
+      return true;
+    }
 
     const isAuthor = Boolean(
       (userEmail && authorEmail && userEmail === authorEmail) ||
@@ -1021,6 +1143,9 @@ export function isGameVisibleToUser(
 
   // Not author, not admin: Private and pending approval games are strictly forbidden
   if (game.visibility === 'private' || game.visibility === 'pending_approval') {
+    if (!game.authorEmail && !game.authorId) {
+      return true;
+    }
     return false;
   }
 
@@ -1045,11 +1170,18 @@ export function getPublicGames(): Game[] {
  */
 export function getMyGames(userEmailOrId?: string): Game[] {
   if (!userEmailOrId) return [];
-  const normalized = userEmailOrId.toLowerCase();
-  return getAllGames().filter(g => 
-    (g.authorEmail && g.authorEmail.toLowerCase() === normalized) ||
-    (g.authorId && g.authorId === userEmailOrId)
-  );
+  const normalized = userEmailOrId.trim().toLowerCase();
+  const isOwnerAdmin = normalized === 'tranthangit2025@gmail.com';
+
+  return getAllGames().filter(g => {
+    const matchEmail = Boolean(g.authorEmail && g.authorEmail.trim().toLowerCase() === normalized);
+    const matchId = Boolean(g.authorId && g.authorId === userEmailOrId);
+    if (matchEmail || matchId) return true;
+    if (isOwnerAdmin && !g.isSystemDefault && !DEFAULT_GAMES.some(d => d.id === g.id) && !g.authorEmail) {
+      return true;
+    }
+    return false;
+  });
 }
 
 // ----------------------------------------------------

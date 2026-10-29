@@ -26,6 +26,7 @@ import { sounds } from '../../utils/sound';
 import { saveGame } from '../../services/gameStorage';
 import { isSpeechSupported, speakText } from '../../utils/speechVoice';
 import { PlayerWordDragQuestion } from '../player/PlayerWordDragQuestion';
+import { useAuth } from '../../context/AuthContext';
 
 interface WordDragGameBuilderProps {
   initialGame?: Game | null;
@@ -109,6 +110,8 @@ export const WordDragGameBuilder: React.FC<WordDragGameBuilderProps> = ({
   onSaveAndExit,
   onCancel,
 }) => {
+  const { currentUser, isAdmin } = useAuth();
+
   // Game metadata
   const [gameTitle, setGameTitle] = useState<string>(
     initialGame?.title || 'TRÒ CHƠI KÉO THẢ Ô CHỮ: BÉ GHÉP TỪ ĐÚNG'
@@ -312,6 +315,10 @@ export const WordDragGameBuilder: React.FC<WordDragGameBuilderProps> = ({
       createdAt: initialGame?.createdAt || Date.now(),
       updatedAt: Date.now(),
       playCount: initialGame?.playCount || 0,
+      authorId: currentUser?.id || initialGame?.authorId,
+      authorName: currentUser?.fullName || initialGame?.authorName || 'Cô giáo mầm non',
+      authorEmail: currentUser?.email || initialGame?.authorEmail,
+      visibility: initialGame?.visibility || (isAdmin ? 'public' : 'private'),
       questions: questions,
       settings: initialGame?.settings || {
         timePerQuestion: 0,

@@ -11,6 +11,7 @@ import {
 } from '../../utils/zipGameHandler';
 import { saveGame } from '../../services/gameStorage';
 import { sounds } from '../../utils/sound';
+import { useAuth } from '../../context/AuthContext';
 import {
   Upload,
   FileCode,
@@ -46,6 +47,7 @@ export const UploadHtmlGameModal: React.FC<UploadHtmlGameModalProps> = ({
   onClose,
   onGameUploaded,
 }) => {
+  const { currentUser, isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState<'info' | 'preview' | 'guide'>('info');
   const [file, setFile] = useState<File | null>(null);
   const [isZipArchive, setIsZipArchive] = useState<boolean>(false);
@@ -359,6 +361,10 @@ export const UploadHtmlGameModal: React.FC<UploadHtmlGameModalProps> = ({
       createdAt: Date.now(),
       updatedAt: Date.now(),
       playCount: 0,
+      authorId: currentUser?.id,
+      authorName: currentUser?.fullName || 'Cô giáo mầm non',
+      authorEmail: currentUser?.email,
+      visibility: isAdmin ? 'public' : 'private',
       settings: {
         timePerQuestion: 0,
         speedBonus: false,
