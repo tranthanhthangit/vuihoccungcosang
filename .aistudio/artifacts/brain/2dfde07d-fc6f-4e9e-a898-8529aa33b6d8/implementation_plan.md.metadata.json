@@ -1,6 +1,6 @@
 {
-  "summary":  "Cập nhật kế hoạch phân quyền theo điều chỉnh mới của người dùng: Tài khoản Member giới hạn tối đa 20 câu hỏi/bộ, tạo tối đa 2 phòng chơi cùng lúc, và xuất kết quả cơ bản. Premium không giới hạn và xuất kết quả nâng cao.",
-  "updatedAt":  "2026-10-27T03:37:17.364839146Z",
+  "summary":  "Kế hoạch triển khai tính năng Quản trị viên kiểm soát danh sách trò chơi hiển thị trên trang chủ:\n- Thêm tab \"Quản lý Trang chủ\" trong Bảng điều khiển Quản trị viên cho phép ghim/bỏ ghim, tìm kiếm, lọc và sắp xếp trò chơi.\n- Cập nhật trang chủ (HomePage) ưu tiên hiển thị trò chơi do Quản trị viên ghim kết hợp với trò chơi người dùng thả tim.\n- Bổ sung phân trang gọn gàng (tối đa 8 trò mỗi trang với nút chuyển trang/xem thêm) giúp giao diện không bị kéo dài khi số lượng trò chơi tăng cao.",
+  "updatedAt":  "2026-10-29T07:35:38.943927844Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

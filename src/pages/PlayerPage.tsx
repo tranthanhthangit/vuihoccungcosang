@@ -405,7 +405,69 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
     }
   }
   const currentQ = effectiveGame.questions[currentQIndex];
-  const myAnswer: TeamAnswer | undefined = session.answers[currentQIndex]?.[joinedTeam.teamId];
+  const rawAnswer: TeamAnswer | undefined = session.answers[currentQIndex]?.[joinedTeam.teamId];
+
+  // Synthesize or enhance answer for open_ended question so child's drawing is never marked as "chưa làm bài"
+  let myAnswer = rawAnswer;
+  if (currentQ?.type === 'open_ended') {
+    const localSavedDrawing = typeof window !== 'undefined'
+      ? localStorage.getItem(`vuihoc_drawing_${session.roomCode}_${joinedTeam.teamId}_${currentQIndex}`)
+      : null;
+
+    if (localSavedDrawing && localSavedDrawing.length > 50) {
+      if (!myAnswer) {
+        myAnswer = {
+          sessionId: session.roomCode,
+          questionIndex: currentQIndex,
+          questionId: currentQ.id,
+          teamId: joinedTeam.teamId,
+          teamName: joinedTeam.teamName,
+          answerId: 'open_ended_submitted',
+          answerText: 'Bé đã vẽ tranh câu trả lời 🎨',
+          submittedAt: Date.now(),
+          responseTimeMs: 0,
+          isCorrect: false,
+          pointsAwarded: 0,
+          openEnded: {
+            textAnswer: '',
+            drawingDataUrl: localSavedDrawing,
+            hasDrawn: true,
+            teacherGrade: 'pending',
+            teacherPoints: currentQ.points || 10,
+            teacherFeedback: '',
+            gradedAt: Date.now(),
+          },
+        };
+      } else if (!myAnswer.openEnded?.drawingDataUrl || myAnswer.openEnded.drawingDataUrl.length < 50) {
+        myAnswer = {
+          ...myAnswer,
+          answerText: myAnswer.openEnded?.textAnswer
+            ? myAnswer.answerText
+            : 'Bé đã vẽ tranh câu trả lời 🎨',
+          openEnded: {
+            ...myAnswer.openEnded,
+            drawingDataUrl: localSavedDrawing,
+            hasDrawn: true,
+            teacherGrade: myAnswer.openEnded?.teacherGrade || 'pending',
+            teacherPoints: myAnswer.openEnded?.teacherPoints ?? (currentQ.points || 10),
+          },
+        };
+      }
+    }
+  }
+
+  // If teacher collected answers and child has a local drawing that wasn't yet acknowledged on server, push it immediately
+  useEffect(() => {
+    if (session?.questionStatus === 'results' && currentQ?.type === 'open_ended' && joinedTeam) {
+      const localDrawing = typeof window !== 'undefined'
+        ? localStorage.getItem(`vuihoc_drawing_${session.roomCode}_${joinedTeam.teamId}_${currentQIndex}`)
+        : null;
+      const remoteDrawing = session.answers[currentQIndex]?.[joinedTeam.teamId]?.openEnded?.drawingDataUrl;
+      if (localDrawing && localDrawing.length > 50 && (!remoteDrawing || remoteDrawing.length < 50)) {
+        handleSubmitOpenEnded('', localDrawing, currentQIndex);
+      }
+    }
+  }, [session?.questionStatus, currentQIndex, joinedTeam?.teamId, currentQ?.type]);
 
   const isNoLimitQ = true;
   const effectiveTimeLimit = 0;

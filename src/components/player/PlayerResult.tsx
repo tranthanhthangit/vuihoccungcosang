@@ -148,12 +148,16 @@ export const PlayerResult: React.FC<PlayerResultProps> = ({
               ) : (
                 <span className={`px-2.5 py-1 rounded-lg ${
                   isPendingOpenEnded
-                    ? 'bg-purple-100 text-purple-900'
+                    ? 'bg-purple-100 text-purple-900 font-black'
                     : isCorrect
-                    ? 'bg-emerald-100 text-emerald-800'
-                    : 'bg-rose-100 text-rose-800'
+                    ? 'bg-emerald-100 text-emerald-800 font-black'
+                    : 'bg-rose-100 text-rose-800 font-bold'
                 }`}>
-                  {answer ? answer.answerText : 'Không trả lời'}
+                  {isOpenEnded
+                    ? (answer?.openEnded?.drawingDataUrl || answer?.openEnded?.annotatedDrawingDataUrl
+                        ? 'Đã nộp bài vẽ câu trả lời 🎨'
+                        : (answer?.openEnded?.textAnswer ? `Tự luận: "${answer.openEnded.textAnswer}"` : (answer?.answerText || 'Đã nộp bài tự luận')))
+                    : (answer ? answer.answerText : 'Không trả lời')}
                 </span>
               )}
             </div>
@@ -161,13 +165,13 @@ export const PlayerResult: React.FC<PlayerResultProps> = ({
             {/* If open-ended drawing or text */}
             {(answer?.openEnded?.annotatedDrawingDataUrl || answer?.openEnded?.drawingDataUrl) && (
               <div className="border-t border-slate-100 pt-2">
-                <span className="text-slate-500 block mb-1">
-                  {answer?.openEnded?.annotatedDrawingDataUrl ? '🎨 Bài làm đã được cô sửa & chấm:' : 'Hình vẽ của bé:'}
+                <span className="text-slate-600 font-extrabold block mb-1.5 text-xs text-left">
+                  {answer?.openEnded?.annotatedDrawingDataUrl ? '🎨 Bài làm đã được cô sửa & chấm:' : '🖼️ Hình vẽ của bé:'}
                 </span>
                 <img
                   src={answer.openEnded.annotatedDrawingDataUrl || answer.openEnded.drawingDataUrl}
                   alt="Bài vẽ của bé"
-                  className="max-h-44 rounded-xl border border-purple-200 bg-white mx-auto shadow-2xs"
+                  className="max-h-48 sm:max-h-56 rounded-2xl border-2 border-purple-200 bg-white mx-auto shadow-sm p-1 object-contain"
                 />
               </div>
             )}

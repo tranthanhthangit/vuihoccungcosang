@@ -23,6 +23,8 @@ import {
   Calendar,
   School,
   FileQuestion,
+  Star,
+  Pin,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Game, UserProfile, UserRole } from '../../types/game';
@@ -33,6 +35,12 @@ import {
   rejectGame,
   saveGame,
   subscribeGames,
+  getAdminHomepageGameIds,
+  toggleAdminHomepageGameId,
+  subscribeAdminHomepageGames,
+  getFeaturedGameId,
+  setFeaturedGameId,
+  subscribeFeaturedGame,
 } from '../../services/gameStorage';
 import { sounds } from '../../utils/sound';
 
@@ -55,10 +63,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     toggleUserStatus,
   } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<'teachers' | 'approvals' | 'system_games'>('approvals');
+  const [activeTab, setActiveTab] = useState<'teachers' | 'approvals' | 'system_games' | 'homepage'>('approvals');
   const [games, setGames] = useState<Game[]>(() => getAllGames());
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<'all' | 'teacher_member' | 'teacher_premium' | 'admin'>('all');
+
+  // Admin Homepage Curated Games State
+  const [adminHomepageIds, setAdminHomepageIds] = useState<string[]>(() => getAdminHomepageGameIds());
+  const [featuredBannerId, setFeaturedBannerId] = useState<string>(() => getFeaturedGameId());
+  const [homepageSearch, setHomepageSearch] = useState('');
+  const [homepageFilter, setHomepageFilter] = useState<'all' | 'pinned' | 'unpinned'>('all');
 
   // Preview game modal state
   const [previewGame, setPreviewGame] = useState<Game | null>(null);
@@ -74,7 +88,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const unsub = subscribeGames((updated) => {
       setGames(updated);
     });
-    return () => unsub();
+    const unsubHp = subscribeAdminHomepageGames((ids) => {
+      setAdminHomepageIds(ids);
+    });
+    const unsubBanner = subscribeFeaturedGame((id) => {
+      setFeaturedBannerId(id);
+    });
+    return () => {
+      unsub();
+      unsubHp();
+      unsubBanner();
+    };
   }, []);
 
   const pendingGames = games.filter((g) => g.visibility === 'pending_approval');
@@ -85,6 +109,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const showFeedback = (type: 'success' | 'error', message: string) => {
     setFeedback({ type, message });
     setTimeout(() => setFeedback(null), 3500);
+  };
+
+  const handleToggleHomepagePin = (game: Game) => {
+    sounds.playClick();
+    const isNowPinned = toggleAdminHomepageGameId(game.id);
+    if (isNowPinned) {
+      sounds.playCorrect();
+      showFeedback('success', `✨ Đã ghim trò chơi "${game.title}" hiển thị lên Trang chủ!`);
+    } else {
+      showFeedback('success', `Đã bỏ ghim trò chơi "${game.title}" khỏi Trang chủ.`);
+    }
+  };
+
+  const handleSetFeaturedBanner = (game: Game) => {
+    sounds.playCorrect();
+    setFeaturedGameId(game.id);
+    showFeedback('success', `⭐ Đã đặt "${game.title}" làm Trò chơi ghim Banner chính!`);
   };
 
   const handleApprove = (game: Game) => {
@@ -331,6 +372,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           >
             <BookOpen className="w-4 h-4" />
             <span>Ngân hàng câu hỏi Website</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              sounds.playClick();
+              setActiveTab('homepage');
+            }}
+            className={`px-4 py-2.5 rounded-xl font-black text-xs sm:text-sm flex items-center gap-2 transition cursor-pointer ${
+              activeTab === 'homepage'
+                ? 'bg-rose-500 text-white shadow-md shadow-rose-200'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>Quản lý Trang chủ</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-white text-rose-700 tabular-nums">
+              {adminHomepageIds.length}
+            </span>
           </button>
         </div>
 
@@ -736,6 +796,306 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* TAB 4: QUẢN LÝ HIỂN THỊ TRANG CHỦ & GHIM NỔI BẬT */}
+        {activeTab === 'homepage' && (
+          <div className="space-y-6">
+            {/* Header & Quick stats */}
+            <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-2xs space-y-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-xs font-black mb-1.5">
+                    <Sparkles className="w-3.5 h-3.5 fill-rose-500 text-rose-500" />
+                    <span>Dành riêng cho Quản trị viên</span>
+                  </div>
+                  <h2 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">
+                    Quản lý hiển thị Trò chơi Trang chủ
+                  </h2>
+                  <p className="text-xs sm:text-sm text-slate-500 font-medium mt-1">
+                    Các trò chơi được Quản trị viên ghim tại đây sẽ hiển thị ưu tiên hàng đầu tại mục <strong>"Trò chơi nổi bật & Được yêu thích"</strong> ngoài trang chủ.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    sounds.playClick();
+                    onBackToHome();
+                  }}
+                  className="px-4 py-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs sm:text-sm flex items-center gap-2 transition cursor-pointer self-start md:self-auto shrink-0"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span>Xem ngoài Trang chủ</span>
+                </button>
+              </div>
+
+              {/* Status Indicator Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2 border-t border-slate-100">
+                <div className="bg-rose-50/60 rounded-2xl p-4 border border-rose-100 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-rose-900 block">Đang ghim Trang chủ</span>
+                    <span className="text-2xl font-black text-rose-600 tabular-nums">
+                      {adminHomepageIds.length} <span className="text-xs font-medium text-slate-500">trò</span>
+                    </span>
+                  </div>
+                  <span className="text-[11px] font-black px-2.5 py-1 rounded-full bg-white text-rose-700 shadow-xs border border-rose-200">
+                    {adminHomepageIds.length >= 4 && adminHomepageIds.length <= 8 ? '✓ Tối ưu (4 - 8 trò)' : `${adminHomepageIds.length} trò`}
+                  </span>
+                </div>
+
+                <div className="bg-amber-50/60 rounded-2xl p-4 border border-amber-100 flex items-center justify-between">
+                  <div className="min-w-0 pr-2">
+                    <span className="text-xs font-bold text-amber-900 block">Ghim Banner đỉnh trang</span>
+                    <span className="text-sm font-black text-amber-950 truncate block mt-0.5" title={games.find((g) => g.id === featuredBannerId)?.title || 'Chưa chọn'}>
+                      {games.find((g) => g.id === featuredBannerId)?.title || 'Chưa chọn'}
+                    </span>
+                  </div>
+                  <span className="text-lg shrink-0">⭐</span>
+                </div>
+
+                <div className="bg-sky-50/60 rounded-2xl p-4 border border-sky-100 flex items-center justify-between sm:col-span-2 lg:col-span-1">
+                  <div>
+                    <span className="text-xs font-bold text-sky-900 block">Kho đề khả dụng</span>
+                    <span className="text-2xl font-black text-sky-700 tabular-nums">
+                      {systemGames.length} <span className="text-xs font-medium text-slate-500">bộ đề</span>
+                    </span>
+                  </div>
+                  <span className="text-xs font-semibold text-sky-600 bg-white px-2.5 py-1 rounded-full border border-sky-200">
+                    Đã xuất bản
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Search & Filter Toolbar */}
+            <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="relative w-full sm:w-80">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={homepageSearch}
+                  onChange={(e) => setHomepageSearch(e.target.value)}
+                  placeholder="Tìm kiếm theo tên đề, môn học..."
+                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-rose-400 focus:bg-white"
+                />
+              </div>
+
+              <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+                <button
+                  type="button"
+                  onClick={() => {
+                    sounds.playClick();
+                    setHomepageFilter('all');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer whitespace-nowrap ${
+                    homepageFilter === 'all'
+                      ? 'bg-slate-900 text-white'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                  }`}
+                >
+                  Tất cả ({systemGames.length})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    sounds.playClick();
+                    setHomepageFilter('pinned');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer whitespace-nowrap flex items-center gap-1 ${
+                    homepageFilter === 'pinned'
+                      ? 'bg-rose-500 text-white shadow-xs'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                  }`}
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span>Đang ghim Trang chủ ({adminHomepageIds.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    sounds.playClick();
+                    setHomepageFilter('unpinned');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer whitespace-nowrap ${
+                    homepageFilter === 'unpinned'
+                      ? 'bg-slate-900 text-white'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                  }`}
+                >
+                  Chưa ghim ({Math.max(0, systemGames.length - adminHomepageIds.length)})
+                </button>
+              </div>
+            </div>
+
+            {/* List of games to manage */}
+            {(() => {
+              const filteredHomepageGames = systemGames.filter((g) => {
+                const matchesSearch =
+                  (g.title || '').toLowerCase().includes(homepageSearch.toLowerCase()) ||
+                  (g.category || '').toLowerCase().includes(homepageSearch.toLowerCase()) ||
+                  (g.authorName || '').toLowerCase().includes(homepageSearch.toLowerCase());
+
+                const isPinned = adminHomepageIds.includes(g.id);
+                const matchesFilter =
+                  homepageFilter === 'all' ||
+                  (homepageFilter === 'pinned' && isPinned) ||
+                  (homepageFilter === 'unpinned' && !isPinned);
+
+                return matchesSearch && matchesFilter;
+              });
+
+              if (filteredHomepageGames.length === 0) {
+                return (
+                  <div className="bg-white rounded-3xl p-10 text-center border border-slate-200 space-y-3">
+                    <div className="w-14 h-14 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto text-xl">
+                      🔍
+                    </div>
+                    <h3 className="text-base font-black text-slate-800">
+                      Không tìm thấy trò chơi nào phù hợp bộ lọc
+                    </h3>
+                    <p className="text-xs text-slate-400 font-medium">
+                      Hãy thử tìm với từ khóa khác hoặc chuyển sang xem "Tất cả".
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredHomepageGames.map((game) => {
+                    const isPinned = adminHomepageIds.includes(game.id);
+                    const isBanner = game.id === featuredBannerId;
+
+                    return (
+                      <div
+                        key={game.id}
+                        className={`bg-white rounded-3xl p-5 border-2 transition-all flex flex-col justify-between gap-4 shadow-2xs ${
+                          isPinned
+                            ? 'border-rose-300 ring-2 ring-rose-100 bg-gradient-to-b from-rose-50/20 to-white'
+                            : 'border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="space-y-2.5">
+                          {/* Badges top */}
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-black uppercase">
+                              {game.category || 'Mầm non'}
+                            </span>
+
+                            <div className="flex items-center gap-1.5">
+                              {isBanner && (
+                                <span className="px-2 py-0.5 rounded-full bg-amber-400 text-amber-950 text-[10px] font-black flex items-center gap-1 shadow-xs">
+                                  <Star className="w-3 h-3 fill-amber-950" />
+                                  <span>Banner chính</span>
+                                </span>
+                              )}
+                              {isPinned && (
+                                <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black flex items-center gap-1 shadow-xs">
+                                  <Sparkles className="w-3 h-3 fill-white" />
+                                  <span>Ghim Trang chủ</span>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Title & Desc */}
+                          <div>
+                            <h3 className="text-base font-black text-slate-900 leading-snug line-clamp-1" title={game.title}>
+                              {game.title}
+                            </h3>
+                            <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed mt-1">
+                              {game.description || 'Trò chơi tương tác sinh động cho bé mầm non.'}
+                            </p>
+                          </div>
+
+                          {/* Metadata row */}
+                          <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 pt-1 border-t border-slate-100">
+                            <span>{game.targetAge || '5 - 6 tuổi'} · {game.questions?.length || 0} câu hỏi</span>
+                            <span className="text-slate-400 font-medium">Tác giả: {game.authorName || 'Hệ thống'}</span>
+                          </div>
+                        </div>
+
+                        {/* Control Actions Bottom */}
+                        <div className="space-y-2 pt-2 border-t border-slate-100">
+                          {/* Primary Homepage Pin Toggle Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleHomepagePin(game)}
+                            className={`w-full py-2.5 px-3 rounded-2xl font-black text-xs flex items-center justify-center gap-2 transition cursor-pointer active:scale-[0.98] shadow-xs ${
+                              isPinned
+                                ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-rose-200'
+                                : 'bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 hover:border-rose-300'
+                            }`}
+                          >
+                            {isPinned ? (
+                              <>
+                                <Check className="w-4 h-4 text-white" />
+                                <span>Đang hiển thị ở Trang chủ (Nhấn để gỡ)</span>
+                              </>
+                            ) : (
+                              <>
+                                <Pin className="w-4 h-4 text-slate-400 group-hover:text-rose-500" />
+                                <span>+ Ghim lên Trang chủ</span>
+                              </>
+                            )}
+                          </button>
+
+                          {/* Secondary Actions: Banner Pin + Preview + Quick Play */}
+                          <div className="flex items-center gap-2">
+                            {!isBanner ? (
+                              <button
+                                type="button"
+                                onClick={() => handleSetFeaturedBanner(game)}
+                                className="flex-1 py-1.5 px-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-[11px] font-bold flex items-center justify-center gap-1 transition cursor-pointer"
+                                title="Đặt trò chơi này hiển thị trên Banner đỉnh trang chủ"
+                              >
+                                <Star className="w-3.5 h-3.5 text-amber-500" />
+                                <span>Đặt làm Banner</span>
+                              </button>
+                            ) : (
+                              <div className="flex-1 py-1.5 px-2.5 rounded-xl bg-amber-100/70 text-amber-900 border border-amber-300 text-[11px] font-black flex items-center justify-center gap-1">
+                                <Star className="w-3.5 h-3.5 fill-amber-600 text-amber-600" />
+                                <span>Đang là Banner chính</span>
+                              </div>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                sounds.playClick();
+                                setPreviewGame(game);
+                              }}
+                              className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition cursor-pointer"
+                              title="Xem trước câu hỏi"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+
+                            {onSelectGameToPlay && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  sounds.playCorrect();
+                                  onSelectGameToPlay(game);
+                                }}
+                                className="p-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition cursor-pointer"
+                                title="Mở phòng chơi thử"
+                              >
+                                <Play className="w-4 h-4 fill-current" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         )}
       </main>

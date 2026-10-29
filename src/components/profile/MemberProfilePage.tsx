@@ -41,16 +41,18 @@ import {
 } from '../../services/gameStorage';
 import { sounds } from '../../utils/sound';
 
+type ProfileTab = 'games' | 'history' | 'info' | 'password';
+
 interface MemberProfilePageProps {
+  initialTab?: ProfileTab;
   onBack: () => void;
   onPlayGame: (game: Game) => void;
   onEditGame: (game: Game) => void;
   onCreateNewGame: () => void;
 }
 
-type ProfileTab = 'games' | 'history' | 'info' | 'password';
-
 export const MemberProfilePage: React.FC<MemberProfilePageProps> = ({
+  initialTab = 'games',
   onBack,
   onPlayGame,
   onEditGame,
@@ -68,7 +70,13 @@ export const MemberProfilePage: React.FC<MemberProfilePageProps> = ({
     signOut,
   } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<ProfileTab>('games');
+  const [activeTab, setActiveTab] = useState<ProfileTab>(initialTab);
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
 
   // Games state
   const [myGames, setMyGames] = useState<Game[]>([]);

@@ -41,6 +41,7 @@ import {
   toggleFavoriteGameId,
   subscribeFavorites,
   submitGameForApproval,
+  isGameVisibleToUser,
 } from '../../services/gameStorage';
 import { useAuth } from '../../context/AuthContext';
 import { sounds } from '../../utils/sound';
@@ -142,9 +143,12 @@ export const GameList: React.FC<GameListProps> = ({
     'Kỹ năng xã hội',
   ];
 
+  // 0. Base security & privacy filter: strictly exclude private or pending games from unauthenticated users or non-authors
+  const visibleGames = games.filter(g => isGameVisibleToUser(g, currentUser, isAdmin));
+
   // Combine default categories with any existing categories from custom/imported games
   const existingCategories = Array.from(
-    new Set(games.map((g) => g.category).filter((c): c is string => Boolean(c && c.trim())))
+    new Set(visibleGames.map((g) => g.category).filter((c): c is string => Boolean(c && c.trim())))
   );
   const categories = [
     'Tất cả',
@@ -153,7 +157,7 @@ export const GameList: React.FC<GameListProps> = ({
     ...Array.from(new Set([...defaultCategories.slice(3), ...existingCategories])),
   ];
 
-  const filteredGames = games.filter(g => {
+  const filteredGames = visibleGames.filter(g => {
     // 1. Visibility Tab Filter
     let matchVisibility = true;
     if (visibilityTab === 'my_games') {
@@ -322,7 +326,7 @@ export const GameList: React.FC<GameListProps> = ({
           >
             <span>Tất cả kho đề</span>
             <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-700 font-bold tabular-nums">
-              {games.length}
+              {visibleGames.length}
             </span>
           </button>
 
@@ -342,29 +346,31 @@ export const GameList: React.FC<GameListProps> = ({
               <GraduationCap className="w-3.5 h-3.5 text-indigo-600" />
               <span>Bài dạy của tôi</span>
               <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-indigo-100 text-indigo-800 font-bold tabular-nums">
-                {games.filter(g => (g.authorEmail && g.authorEmail.toLowerCase() === currentUser.email.toLowerCase()) || (g.authorId && g.authorId === currentUser.id)).length}
+                {visibleGames.filter(g => (g.authorEmail && g.authorEmail.toLowerCase() === currentUser.email.toLowerCase()) || (g.authorId && g.authorId === currentUser.id)).length}
               </span>
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={() => {
-              sounds.playClick();
-              setVisibilityTab('pending');
-            }}
-            className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-black transition cursor-pointer flex items-center gap-1.5 ${
-              visibilityTab === 'pending'
-                ? 'bg-white text-amber-800 shadow-xs ring-1 ring-amber-300'
-                : 'text-slate-600 hover:text-amber-800'
-            }`}
-          >
-            <Clock className="w-3.5 h-3.5 text-amber-600" />
-            <span>Chờ duyệt</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-800 font-bold tabular-nums">
-              {games.filter(g => g.visibility === 'pending_approval').length}
-            </span>
-          </button>
+          {(currentUser || isAdmin) && (
+            <button
+              type="button"
+              onClick={() => {
+                sounds.playClick();
+                setVisibilityTab('pending');
+              }}
+              className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-black transition cursor-pointer flex items-center gap-1.5 ${
+                visibilityTab === 'pending'
+                  ? 'bg-white text-amber-800 shadow-xs ring-1 ring-amber-300'
+                  : 'text-slate-600 hover:text-amber-800'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5 text-amber-600" />
+              <span>Chờ duyệt</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-800 font-bold tabular-nums">
+                {visibleGames.filter(g => g.visibility === 'pending_approval').length}
+              </span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -381,7 +387,7 @@ export const GameList: React.FC<GameListProps> = ({
             <Shield className="w-3.5 h-3.5 text-emerald-600" />
             <span>Đề mẫu Website</span>
             <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 font-bold tabular-nums">
-              {games.filter(g => g.isSystemDefault || g.visibility === 'public').length}
+              {visibleGames.filter(g => g.isSystemDefault || g.visibility === 'public').length}
             </span>
           </button>
         </div>
@@ -469,7 +475,15 @@ export const GameList: React.FC<GameListProps> = ({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredGames.map((game) => (
+          {filteredGames.map((game) => {
+            const isOwner = Boolean(
+              currentUser &&
+              ((game.authorEmail && currentUser.email && game.authorEmail.toLowerCase() === currentUser.email.toLowerCase()) ||
+               (game.authorId && currentUser.id && game.authorId === currentUser.id))
+            );
+            const canManage = isAdmin || isOwner;
+
+            return (
             <div
               key={game.id}
               className="bg-white rounded-3xl p-3.5 sm:p-4 border-2 border-slate-100 shadow-md hover:shadow-2xl transition-all duration-300 flex flex-col justify-between group overflow-hidden hover:-translate-y-1"
@@ -638,16 +652,18 @@ export const GameList: React.FC<GameListProps> = ({
                     </button>
                   )}
 
-                  <button
-                    onClick={() => {
-                      sounds.playClick();
-                      onEditGame(game);
-                    }}
-                    title="Chỉnh sửa"
-                    className="p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition cursor-pointer"
-                  >
-                    <Edit3 className="w-4 h-4" />
-                  </button>
+                  {canManage && (
+                    <button
+                      onClick={() => {
+                        sounds.playClick();
+                        onEditGame(game);
+                      }}
+                      title="Chỉnh sửa"
+                      className="p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition cursor-pointer"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                    </button>
+                  )}
 
                   <button
                     onClick={() => handleDuplicate(game)}
@@ -657,20 +673,23 @@ export const GameList: React.FC<GameListProps> = ({
                     <Copy className="w-4 h-4" />
                   </button>
 
-                  <button
-                    onClick={() => {
-                      sounds.playClick();
-                      setGameToDelete(game);
-                    }}
-                    title="Xóa trò chơi"
-                    className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {canManage && !game.isSystemDefault && (
+                    <button
+                      onClick={() => {
+                        sounds.playClick();
+                        setGameToDelete(game);
+                      }}
+                      title="Xóa trò chơi"
+                      className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

@@ -401,19 +401,23 @@ export class RealtimeClient {
 
       let isCorrect = false;
       let pointsAwarded = 0;
+      let effectiveAnswerText = '';
 
       if (question) {
         if (question.type === 'multiple_choice' || question.type === 'true_false' || question.type === 'letter_recognition' || question.type === 'counting') {
           const opt = question.options?.find(o => o.id === answerId);
           isCorrect = Boolean(opt?.isCorrect);
           pointsAwarded = isCorrect ? (question.points || 10) : 0;
+          effectiveAnswerText = opt?.text || answerId || '';
         } else if (question.type === 'word_choice' && answerIds) {
           const correctIds = question.options?.filter(o => o.isCorrect).map(o => o.id) || [];
           isCorrect = correctIds.length === answerIds.length && correctIds.every(id => answerIds.includes(id));
           pointsAwarded = isCorrect ? (question.points || 10) : 0;
+          effectiveAnswerText = answerIds.join(', ');
         } else if (question.type === 'word_drag_drop' && chosenLetter) {
           isCorrect = Boolean(chosenLetter && question.title?.toLowerCase().includes(chosenLetter.toLowerCase()));
           pointsAwarded = isCorrect ? (question.points || 10) : 0;
+          effectiveAnswerText = `Bé ghép chữ "${chosenLetter}"`;
         } else if (htmlGameResult) {
           const maxPoints = question.points || 30;
           if (htmlGameResult.score !== undefined) {
@@ -423,6 +427,16 @@ export class RealtimeClient {
             isCorrect = Boolean(htmlGameResult.isCorrect);
             pointsAwarded = isCorrect ? maxPoints : 0;
           }
+          effectiveAnswerText = htmlGameResult.summary || `Đạt ${pointsAwarded} điểm`;
+        } else if (question.type === 'open_ended' || openEnded) {
+          // Open-ended drawing question: score is awarded when teacher grades it
+          isCorrect = false;
+          pointsAwarded = 0;
+          const drawing = openEnded?.drawingDataUrl || this.serverlessSession.drafts?.[questionIndex]?.[teamId]?.drawingDataUrl || '';
+          const text = (openEnded?.textAnswer || this.serverlessSession.drafts?.[questionIndex]?.[teamId]?.textAnswer || '').trim();
+          effectiveAnswerText = text
+            ? `Tự luận: "${text.slice(0, 60)}${text.length > 60 ? '...' : ''}"`
+            : (drawing ? 'Bé đã vẽ tranh câu trả lời 🎨' : 'Đã nộp bài tự luận');
         } else {
           isCorrect = true;
           pointsAwarded = question.points || 10;
@@ -431,9 +445,16 @@ export class RealtimeClient {
 
       const qAns = this.serverlessSession.answers[questionIndex] || {};
       const team = this.serverlessSession.teams[teamId];
+      const prevAns = qAns[teamId];
+      const prevPoints = prevAns ? (prevAns.pointsAwarded || 0) : 0;
+
+      // Deduct previous points for this question before adding new points to prevent duplicate scoring
       if (team) {
-        team.score = (team.score || 0) + pointsAwarded;
+        team.score = Math.max(0, (team.score || 0) - prevPoints + pointsAwarded);
       }
+
+      const effectiveDrawing = openEnded?.drawingDataUrl || this.serverlessSession.drafts?.[questionIndex]?.[teamId]?.drawingDataUrl || '';
+      const effectiveText = (openEnded?.textAnswer || this.serverlessSession.drafts?.[questionIndex]?.[teamId]?.textAnswer || '').trim();
 
       qAns[teamId] = {
         sessionId: this.serverlessSession.sessionId,
@@ -441,15 +462,23 @@ export class RealtimeClient {
         questionId: question?.id || '',
         teamId,
         teamName: team?.teamName || teamId,
-        answerId: answerId || '',
+        answerId: answerId || (effectiveDrawing ? 'open_ended_submitted' : 'submission'),
         answerIds: answerIds || [],
-        answerText: openEnded?.textAnswer || '',
+        answerText: effectiveAnswerText || openEnded?.textAnswer || '',
         submittedAt: Date.now(),
         responseTimeMs: Date.now() - (this.serverlessSession.questionStartTime || Date.now()),
         isCorrect,
         pointsAwarded,
         assignedSet: assigned,
-        openEnded,
+        openEnded: (question?.type === 'open_ended' || openEnded || effectiveDrawing) ? {
+          textAnswer: effectiveText,
+          drawingDataUrl: effectiveDrawing,
+          hasDrawn: Boolean(effectiveDrawing && effectiveDrawing.length > 20),
+          teacherGrade: prevAns?.openEnded?.teacherGrade || openEnded?.teacherGrade || 'pending',
+          teacherPoints: prevAns?.openEnded?.teacherPoints ?? (question?.points || 10),
+          teacherFeedback: prevAns?.openEnded?.teacherFeedback || '',
+          gradedAt: Date.now(),
+        } : undefined,
       };
 
       this.serverlessSession.answers[questionIndex] = qAns;
@@ -1048,24 +1077,63 @@ export class RealtimeClient {
       if (!this.serverlessSession.answers[qIdx]) {
         this.serverlessSession.answers[qIdx] = {};
       }
-      // Fill timeouts for any teams that didn't submit
+      // Fill answers for any teams that didn't submit
       Object.keys(this.serverlessSession.teams).forEach(teamId => {
         if (!this.serverlessSession!.answers[qIdx][teamId]) {
           const team = this.serverlessSession!.teams[teamId];
           const question = this.serverlessSession!.game.questions[qIdx];
-          this.serverlessSession!.answers[qIdx][teamId] = {
-            sessionId: this.serverlessSession!.sessionId,
-            questionIndex: qIdx,
-            questionId: question?.id || '',
-            teamId,
-            teamName: team?.teamName || teamId,
-            answerId: 'timeout',
-            answerText: 'Hết giờ (chưa trả lời)',
-            submittedAt: Date.now(),
-            responseTimeMs: 0,
-            isCorrect: false,
-            pointsAwarded: 0,
-          };
+          const draft = this.serverlessSession!.drafts?.[qIdx]?.[teamId] ||
+            this.serverlessSession!.drafts?.[String(qIdx)]?.[teamId] ||
+            this.serverlessSession!.drafts?.[qIdx]?.[teamId.toLowerCase()] ||
+            this.serverlessSession!.drafts?.[String(qIdx)]?.[teamId.toLowerCase()];
+
+          const hasDrawing = Boolean(draft?.drawingDataUrl && draft.drawingDataUrl.length > 20);
+          const hasText = Boolean(draft?.textAnswer && draft.textAnswer.trim());
+          const isOpenEnded = question?.type === 'open_ended';
+
+          if (isOpenEnded) {
+            const drawing = draft?.drawingDataUrl || '';
+            const text = (draft?.textAnswer || '').trim();
+            const hasWork = Boolean(hasDrawing || hasText || draft?.hasDrawn);
+            this.serverlessSession!.answers[qIdx][teamId] = {
+              sessionId: this.serverlessSession!.sessionId,
+              questionIndex: qIdx,
+              questionId: question?.id || '',
+              teamId,
+              teamName: team?.teamName || teamId,
+              answerId: hasWork ? 'draft_auto_submitted_end_question' : 'auto_submitted_end_question',
+              answerText: text
+                ? `Tự luận: "${text.slice(0, 60)}${text.length > 60 ? '...' : ''}"`
+                : (drawing ? 'Bé đã vẽ tranh câu trả lời 🎨' : 'Đã nộp bài tự luận'),
+              submittedAt: Date.now(),
+              responseTimeMs: 0,
+              isCorrect: false,
+              pointsAwarded: 0,
+              openEnded: {
+                textAnswer: text,
+                drawingDataUrl: drawing,
+                hasDrawn: Boolean(hasWork),
+                teacherGrade: 'pending',
+                teacherPoints: question?.points || 10,
+                teacherFeedback: '',
+                gradedAt: Date.now(),
+              },
+            };
+          } else {
+            this.serverlessSession!.answers[qIdx][teamId] = {
+              sessionId: this.serverlessSession!.sessionId,
+              questionIndex: qIdx,
+              questionId: question?.id || '',
+              teamId,
+              teamName: team?.teamName || teamId,
+              answerId: 'timeout',
+              answerText: 'Hết giờ (chưa trả lời)',
+              submittedAt: Date.now(),
+              responseTimeMs: 0,
+              isCorrect: false,
+              pointsAwarded: 0,
+            };
+          }
         }
       });
       this.persistServerlessSession();

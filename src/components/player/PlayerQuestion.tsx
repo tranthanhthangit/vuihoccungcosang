@@ -115,18 +115,32 @@ export const PlayerQuestion: React.FC<PlayerQuestionProps> = ({
     }
   };
 
+  const lastSubmitTimeRef = useRef<number>(0);
+
   // Single choice: select option (never locks; children can change choice freely until teacher clicks end question)
   const handleSelectSingleOption = (optId: string) => {
+    // If child taps the exact same option that is already selected, ignore duplicate click
+    if (selectedOptId === optId) return;
+
+    // Cooldown guard to avoid rapid duplicate touch taps
+    const now = Date.now();
+    if (now - lastSubmitTimeRef.current < 350) return;
+    lastSubmitTimeRef.current = now;
+
     setSelectedOptId(optId);
     stopSpeaking();
     sounds.playClick();
 
-    // Update server with current selection, but keep options completely open and changeable
+    // Update server with current selection
     onSubmitAnswer(optId, [optId]);
   };
 
   // Multiple choice: toggle option selection (never locks; children can change choices freely)
   const handleToggleMultipleOption = (optId: string) => {
+    const now = Date.now();
+    if (now - lastSubmitTimeRef.current < 250) return;
+    lastSubmitTimeRef.current = now;
+
     sounds.playClick();
     stopSpeaking();
     const nextSelected = selectedOptIds.includes(optId)

@@ -245,8 +245,12 @@ function initMemoryCache(): void {
           parsed.push(def);
         }
       }
-      // Ensure all games support up to 12 teams
+      // Ensure all games support up to 12 teams and default games have correct flags
       parsed.forEach(g => {
+        if (DEFAULT_GAMES.some(d => d.id === g.id)) {
+          g.isSystemDefault = true;
+          if (!g.visibility) g.visibility = 'public';
+        }
         if (g.settings && (!g.settings.maxTeams || g.settings.maxTeams < 12)) {
           g.settings.maxTeams = 12;
         }
@@ -256,7 +260,13 @@ function initMemoryCache(): void {
       safeSaveGamesToLocalStorage(cachedGames);
     } else {
       // First time load: only defaults that are not in trash/purged
-      cachedGames = DEFAULT_GAMES.filter(d => !trashIds.has(d.id) && !cachedPurgedDefaultIds.has(d.id));
+      cachedGames = DEFAULT_GAMES
+        .filter(d => !trashIds.has(d.id) && !cachedPurgedDefaultIds.has(d.id))
+        .map(d => ({
+          ...d,
+          isSystemDefault: true,
+          visibility: 'public' as const,
+        }));
       safeSaveGamesToLocalStorage(cachedGames);
     }
   } catch (err) {
@@ -306,8 +316,26 @@ async function asyncHydrateFromPersistentStores(): Promise<void> {
 
     // 2. Fetch from backend server /api/games/custom and /api/games/trash
     try {
+      let customApiUrl = '/api/games/custom';
+      if (typeof window !== 'undefined') {
+        try {
+          const rawUser = localStorage.getItem('vuihoc_current_user_v2');
+          if (rawUser) {
+            const u = JSON.parse(rawUser);
+            const params = new URLSearchParams();
+            if (u.email) params.set('userEmail', u.email);
+            if (u.id) params.set('userId', u.id);
+            if (u.role === 'admin' || (u.email && u.email.toLowerCase() === 'tranthangit2025@gmail.com')) {
+              params.set('isAdmin', 'true');
+            }
+            const qs = params.toString();
+            if (qs) customApiUrl += `?${qs}`;
+          }
+        } catch {}
+      }
+
       const [customRes, trashRes] = await Promise.all([
-        fetch('/api/games/custom'),
+        fetch(customApiUrl),
         fetch('/api/games/trash'),
       ]);
 
@@ -829,6 +857,70 @@ export function toggleFavoriteGameId(gameId: string): boolean {
 }
 
 // ----------------------------------------------------
+// ADMIN HOMEPAGE CURATED GAMES (Trò chơi do Quản trị viên ghim trang chủ)
+// ----------------------------------------------------
+const ADMIN_HOMEPAGE_GAMES_KEY = 'vuihoc_admin_homepage_game_ids';
+const adminHomepageListeners = new Set<(ids: string[]) => void>();
+
+export const DEFAULT_ADMIN_HOMEPAGE_IDS = [
+  'game_chu_h_k',
+  'game_html_u_uw_nghe_nghiep',
+  'game_chu_u_u',
+  'game_chu_o_o_o',
+  'game_toan_dem_1_10',
+  'game_dong_vat',
+];
+
+export function getAdminHomepageGameIds(): string[] {
+  if (typeof window === 'undefined') return DEFAULT_ADMIN_HOMEPAGE_IDS;
+  try {
+    const raw = localStorage.getItem(ADMIN_HOMEPAGE_GAMES_KEY);
+    if (!raw) {
+      localStorage.setItem(ADMIN_HOMEPAGE_GAMES_KEY, JSON.stringify(DEFAULT_ADMIN_HOMEPAGE_IDS));
+      return [...DEFAULT_ADMIN_HOMEPAGE_IDS];
+    }
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_ADMIN_HOMEPAGE_IDS;
+  } catch {
+    return DEFAULT_ADMIN_HOMEPAGE_IDS;
+  }
+}
+
+export function setAdminHomepageGameIds(ids: string[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(ADMIN_HOMEPAGE_GAMES_KEY, JSON.stringify(ids));
+    adminHomepageListeners.forEach(fn => {
+      try { fn(ids); } catch {}
+    });
+  } catch {}
+}
+
+export function toggleAdminHomepageGameId(gameId: string): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const list = getAdminHomepageGameIds();
+    const isPinned = list.includes(gameId);
+    const updated = isPinned ? list.filter(id => id !== gameId) : [...list, gameId];
+    setAdminHomepageGameIds(updated);
+    return !isPinned;
+  } catch {
+    return false;
+  }
+}
+
+export function isGamePinnedOnHomepage(gameId: string): boolean {
+  return getAdminHomepageGameIds().includes(gameId);
+}
+
+export function subscribeAdminHomepageGames(listener: (ids: string[]) => void): () => void {
+  adminHomepageListeners.add(listener);
+  return () => {
+    adminHomepageListeners.delete(listener);
+  };
+}
+
+// ----------------------------------------------------
 // RBAC VISIBILITY & PUBLIC APPROVAL QUEUE METHODS
 // ----------------------------------------------------
 
@@ -900,10 +992,52 @@ export function getPendingApprovalGames(): Game[] {
 }
 
 /**
- * Get all public games (including approved and system defaults)
+ * Checks whether a game is visible to the specified user:
+ * - Administrators can view all games (including private & pending approval).
+ * - Authors/creators can view their own games (public, private, pending approval).
+ * - Unauthenticated visitors and other members can ONLY view public games ('public') and website default games.
+ * - Private ('private') and pending approval ('pending_approval') games are NEVER exposed to unauthenticated users or other users.
+ */
+export function isGameVisibleToUser(
+  game: Game,
+  user?: { id?: string; email?: string } | null,
+  isAdmin: boolean = false
+): boolean {
+  if (isAdmin) return true;
+
+  // If user is logged in and is the author of this game
+  if (user) {
+    const userEmail = (user.email || '').trim().toLowerCase();
+    const userId = user.id;
+    const authorEmail = (game.authorEmail || '').trim().toLowerCase();
+    const authorId = game.authorId;
+
+    const isAuthor = Boolean(
+      (userEmail && authorEmail && userEmail === authorEmail) ||
+      (userId && authorId && userId === authorId)
+    );
+    if (isAuthor) return true;
+  }
+
+  // Not author, not admin: Private and pending approval games are strictly forbidden
+  if (game.visibility === 'private' || game.visibility === 'pending_approval') {
+    return false;
+  }
+
+  // Allow public games, system default games, or built-in default games
+  return Boolean(
+    game.visibility === 'public' ||
+    game.isSystemDefault ||
+    DEFAULT_GAMES.some(d => d.id === game.id) ||
+    (!game.visibility && !game.authorEmail && !game.authorId)
+  );
+}
+
+/**
+ * Get all public games (strictly excludes private and pending approval games)
  */
 export function getPublicGames(): Game[] {
-  return getAllGames().filter(g => g.visibility === 'public' || g.isSystemDefault || DEFAULT_GAMES.some(d => d.id === g.id));
+  return getAllGames().filter(g => isGameVisibleToUser(g, null, false));
 }
 
 /**

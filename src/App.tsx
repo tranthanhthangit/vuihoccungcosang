@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Game } from './types/game';
 import { Header } from './components/common/Header';
+import { Footer } from './components/common/Footer';
 import { HomePage } from './pages/HomePage';
 import { HostPage } from './pages/HostPage';
 import { PlayerPage } from './pages/PlayerPage';
@@ -50,6 +51,7 @@ export default function App() {
   const headerHideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [hostSessionKey, setHostSessionKey] = useState<number>(() => Date.now());
   const [hostRoomCodeFromUrl, setHostRoomCodeFromUrl] = useState<string>('');
+  const [profileInitialTab, setProfileInitialTab] = useState<'games' | 'history' | 'info' | 'password'>('games');
 
   // Swipe down gesture detection for revealing header when player is in session
   useEffect(() => {
@@ -380,20 +382,14 @@ export default function App() {
       {/* Top Header for normal views (home, games_list, host, history, and player before joining) */}
       {currentView !== 'builder' && !(currentView === 'player' && isPlayerInSession) && (
         <Header
+          currentView={currentView}
           title="Vui Học Cùng Cô"
-          subtitle={
-            currentView === 'host'
-              ? 'Màn hình máy cô (Host)'
-              : currentView === 'player'
-              ? 'Màn hình học sinh (Player)'
-              : currentView === 'games_list'
-              ? 'Kho trò chơi mầm non'
-              : currentView === 'history'
-              ? 'Lịch sử buổi học'
-              : currentView === 'admin_dashboard'
-              ? 'Quản trị hệ thống'
-              : 'Thế giới trò chơi mầm non'
+          onHome={
+            currentView !== 'home'
+              ? handleHeaderBackOrHome
+              : undefined
           }
+          onOpenGamesBank={() => navigateTo('games_list', '/games')}
           onCreateRoom={() => {
             if (currentView === 'player' && isPlayerInSession) {
               setShowPlayerExitConfirm(true);
@@ -429,12 +425,10 @@ export default function App() {
             }
           }}
           onOpenAdminPortal={() => navigateTo('admin_dashboard', '/admin')}
-          onOpenProfile={() => navigateTo('member_profile', '/profile')}
-          onHome={
-            currentView !== 'home'
-              ? handleHeaderBackOrHome
-              : undefined
-          }
+          onOpenProfile={(tab) => {
+            if (tab) setProfileInitialTab(tab);
+            navigateTo('member_profile', '/profile');
+          }}
         />
       )}
 
@@ -541,6 +535,7 @@ export default function App() {
 
         {currentView === 'member_profile' && (
           <MemberProfilePage
+            initialTab={profileInitialTab}
             onBack={() => navigateTo('home', '/')}
             onPlayGame={handleQuickPlay}
             onEditGame={handleEditGame}
@@ -548,6 +543,11 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Preschool Footer on standard pages */}
+      {currentView !== 'host' && currentView !== 'player' && currentView !== 'builder' && (
+        <Footer onHome={() => navigateTo('home', '/')} />
+      )}
 
       {/* Modal to choose game creation type */}
       <CreateGameTypeModal

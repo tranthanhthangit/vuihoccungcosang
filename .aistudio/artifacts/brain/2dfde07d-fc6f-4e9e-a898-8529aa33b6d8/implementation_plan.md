@@ -1,204 +1,129 @@
-# Hệ Thống Phân Quyền Người Dùng & Quản Trị Hệ Thống (RBAC 4 Tầng)
+# Quản lý Trò chơi Hiển thị Trang chủ dành cho Quản trị viên
 
-Xây dựng hệ thống phân quyền người dùng chuyên nghiệp cho nền tảng giáo dục mầm non **"Vui Học Cùng Cô"**, hỗ trợ 4 phân quyền rõ ràng: Quản trị viên (Admin), Giáo viên tiêu chuẩn (Member), Giáo viên cao cấp (Premium) và Học sinh tham gia tự do (Guest).
+Hệ thống cho phép Quản trị viên (Admin) kiểm soát tập trung toàn bộ danh sách các trò chơi xuất hiện tại Trang chủ, kết hợp thông minh với danh sách trò chơi yêu thích (thả tim) của người dùng và cơ chế phân trang tối ưu chống tràn giao diện.
 
 ---
 
-## User Review & Critical Decisions
+### Quyết định từ Quản trị viên & Xác nhận thiết kế
 
 > [!IMPORTANT]
-> ### Hạn ngạch & Quyền hạn đã cập nhật theo yêu cầu
-> 1. **Phân cấp Hạn ngạch & Quyền hạn Giáo viên**:
->    - **Giáo viên Member (Tài khoản tiêu chuẩn)**:
->      - Giới hạn tối đa **20 câu hỏi / bộ đề**.
->      - Tạo tối đa **2 phòng chơi cùng lúc**.
->      - Xuất kết quả thi đấu **cơ bản** (danh sách xếp hạng và tổng điểm của các đội/bé).
->      - Tùy chọn quyền riêng tư: Riêng tư (Private) hoặc Gửi yêu cầu Admin duyệt công khai (Request Public).
->    - **Giáo viên Premium (Tài khoản cao cấp - VIP)**:
->      - **Không giới hạn** số câu hỏi trên mỗi bộ đề.
->      - **Không giới hạn** số phòng chơi cùng lúc.
->      - Xuất báo cáo thi đấu **nâng cao** (phân tích chi tiết từng câu hỏi, thống kê thời gian phản hồi, tải toàn bộ hình vẽ bài thi của học sinh dạng file nén ZIP / file Excel đầy đủ bảng biểu).
->      - Huy hiệu VIP Hoàng kim nổi bật và quyền truy cập kho câu hỏi Premium độc quyền.
->    - **Quản trị viên (Admin)**:
->      - Quản lý danh sách tài khoản giáo viên (nâng cấp/hạ cấp Member $\leftrightarrow$ Premium $\leftrightarrow$ Admin, khóa/mở tài khoản).
->      - Duyệt các yêu cầu công khai bộ câu hỏi trước khi hiển thị ra toàn website.
->      - Quản lý ngân hàng câu hỏi gốc của hệ thống.
->      - Email `tranthangit2025@gmail.com` tự động được định danh và cấp quyền Admin cao nhất.
->    - **Học sinh (Khách)**:
->      - **100% không yêu cầu đăng ký hay đăng nhập**. Ô nhập mã PIN tham gia trò chơi luôn hiển thị nổi bật và sẵn sàng ở trang chủ.
-> 2. **Phương thức Đăng ký & Đăng nhập**: Email và Mật khẩu cho Giáo viên và Admin (có sẵn tài khoản Admin mẫu để kiểm thử ngay lập tức).
+> Dựa trên phản hồi khảo sát trực tiếp của Quản trị viên:
+> - **Khu vực quản lý tập trung**: Chỉ quản lý trong **Bảng điều khiển Quản trị viên (Admin Dashboard)** để đảm bảo tính an toàn, bảo mật và phân quyền rõ ràng.
+> - **Quy tắc hiển thị trên Trang chủ**: **Ưu tiên trò Quản trị viên ghim** kết hợp các trò người dùng thả tim (Favorites), đảm bảo những trò chơi giáo dục hay nhất luôn được giới thiệu ở vị trí nổi bật.
+> - **Kiểm soát độ dài trang chủ**: Giới hạn hiển thị 8 trò chơi mỗi trang kèm bộ chuyển trang / "Xem thêm" nhẹ nhàng, ngăn chặn việc danh sách dài làm phá vỡ cấu trúc thẩm mỹ mầm non của trang chủ.
 
 ---
 
-## 1. Overview & Core Concept
+## 1. Tổng quan & Mục tiêu
 
-- **Mục tiêu**: Cung cấp cấu trúc quản lý bảo mật, phân định rõ ràng giữa người quản trị hệ thống, giáo viên tiêu chuẩn (giới hạn 20 câu & 2 phòng), giáo viên VIP (không giới hạn) và trẻ mầm non tham gia trò chơi.
-- **Đối tượng người dùng**:
-  1. `admin` (Quản trị viên): Giám sát hệ sinh thái, phê duyệt nội dung công khai, phân quyền tài khoản giáo viên.
-  2. `teacher_member` (Giáo viên Member): Giáo viên đứng lớp tạo tối đa 2 phòng chơi cùng lúc, biên soạn tối đa 20 câu hỏi/bộ, xuất bảng điểm cơ bản.
-  3. `teacher_premium` (Giáo viên Premium): Tài khoản VIP không giới hạn câu hỏi/phòng chơi, xuất báo cáo nâng cao và truy cập tài nguyên chuyên sâu.
-  4. `student` (Học sinh / Khách): Tham gia trò chơi chỉ với mã PIN và tên đội/bé, không cần tài khoản.
-
----
-
-## 2. User Experience & Visual Design
-
-### A. Luồng trải nghiệm người dùng
-
-1. **Học sinh (Không cần tài khoản)**:
-   - Truy cập trang chủ $\rightarrow$ Thấy ngay nút lớn **"Tham gia phòng"** hoặc ô nhập mã PIN $\rightarrow$ Nhập 6 chữ số $\rightarrow$ Vào chơi ngay lập tức.
-2. **Giáo viên Đăng ký & Đăng nhập**:
-   - Bấm nút **"Tài khoản"** trên thanh tiêu đề $\rightarrow$ Mở hộp thoại Đăng nhập/Đăng ký chuẩn mực (Email, Mật khẩu, Họ tên, Trường học).
-   - Sau khi đăng nhập: Hiển thị Avatar, tên cô giáo và huy hiệu tương ứng (`Thành viên` hoặc `VIP Premium`).
-3. **Quản lý Bộ câu hỏi & Kiểm soát Hạn ngạch (Quota Enforcement)**:
-   - Khi tài khoản `Member` tạo câu hỏi: Hệ thống hiển thị thanh đếm số câu hiện tại (VD: `14/20 câu`). Khi đạt tới 20 câu, hiển thị gợi ý thân thiện nâng cấp Premium nếu muốn thêm câu hỏi.
-   - Khi tài khoản `Member` mở phòng chơi: Đếm số phòng đang mở (tối đa 2 phòng). Nếu đạt tối đa 2 phòng, nhắc nhở đóng phòng đang mở trước hoặc nâng cấp VIP.
-   - Khi lưu bộ đề: Cho phép chọn **"Riêng tư"** hoặc **"Yêu cầu công khai"** (chuyển sang trạng thái `Chờ duyệt`).
-4. **Bảng điều khiển Quản trị (Admin Dashboard)**:
-   - Khi tài khoản mang quyền `admin` (hoặc email `tranthangit2025@gmail.com`), xuất hiện nút **"Quản trị hệ thống"** trên Header.
-   - **Tab 1: Quản lý Giáo viên**: Danh sách tất cả giáo viên đăng ký, ngày tham gia, vai trò, số bộ đề đã tạo, nút chuyển đổi quyền hạn (`Member` $\leftrightarrow$ `Premium` $\leftrightarrow$ `Admin`), và nút khóa/mở tài khoản.
-   - **Tab 2: Duyệt Bộ câu hỏi**: Danh sách các bộ đề chờ duyệt với đầy đủ câu hỏi, hình ảnh; nút **"Phê duyệt"** (đưa lên trang chủ) hoặc **"Từ chối"** kèm lý do phản hồi.
-
-### B. Thiết kế Trực quan & Bảng màu (Theme & Palette)
-
-- **Ngôn ngữ thiết kế**: Phong cách giáo dục mầm non tươi sáng, thân thiện và ấm áp.
-- **Hệ thống nhận diện vai trò (Zero-Pill Typography & Badges)**:
-  - `Admin`: Đỏ cam uy tín (`#DC2626`), biểu tượng Vương miện / Khiên quản trị.
-  - `Premium`: Vàng ánh kim sang trọng (`#D97706`), huy hiệu Ngôi sao VIP lấp lánh.
-  - `Member`: Xanh dương thanh lịch (`#2563EB`), biểu tượng Sách giáo án / Bút hoa.
-  - `Học sinh`: Xanh ngọc rạng rỡ (`#059669`), biểu tượng Nụ cười mặt trời.
-- **Không gian bảng điều khiển**: Tối ưu chuẩn desktop 1440px, bố cục rõ ràng, bảng biểu số liệu căn chỉnh chuẩn (`tabular-nums`), tương thích mượt mà trên iPad/máy tính bảng cô giáo.
+- **Mục tiêu**: Trao quyền cho Quản trị viên chủ động tuyển chọn danh mục trò chơi mẫu và trò chơi nổi bật được khuyến nghị trên Trang chủ (`HomePage`), không để danh sách tự do kéo dài vô tận hoặc hiển thị lộn xộn.
+- **Đối tượng sử dụng**:
+  - **Quản trị viên (Admin)**: Thao tác ghim / bỏ ghim, thay đổi độ ưu tiên, xem trước số lượng trò chơi đang hiển thị ra ngoài trang chủ.
+  - **Giáo viên & Học sinh**: Khi truy cập trang chủ sẽ thấy ngay danh mục trò chơi chất lượng cao được kiểm duyệt cùng các trò mình đã thả tim, với bố cục trực quan, mượt mà và không bị ngợp.
+- **Giá trị mang lại**: Giữ cho trang chủ luôn tinh gọn, tươi sáng đúng chuẩn thẩm mỹ giáo dục mầm non, đồng thời linh hoạt thay đổi nội dung nổi bật theo từng sự kiện, chủ đề tuần/tháng.
 
 ---
 
-## 3. Key Product Decisions & Trade-Offs
+## 2. Trải nghiệm người dùng & Thiết kế giao diện (UX/UI)
 
-### Quyết định 1: Thiết lập Hạn ngạch Rõ ràng cho Member vs. Premium
-- **Hạn ngạch Member**:
-  - Số câu hỏi mỗi bộ đề: $\le 20$ câu (phù hợp trọn vẹn cho 1 tiết học mầm non tiêu chuẩn 15-20 phút).
-  - Số phòng chơi đồng thời: $\le 2$ phòng (1 phòng chính và 1 phòng dự phòng/nhóm).
-  - Báo cáo kết quả: Xuất bảng xếp hạng và điểm số cơ bản.
-- **Đặc quyền Premium**:
-  - Không giới hạn số câu hỏi, không giới hạn số phòng đồng thời.
-  - Xuất báo cáo nâng cao (phân tích từng câu, tải ảnh bài vẽ dạng ZIP).
-- **Lý do**: Tạo sự cân bằng lý tưởng: Member hoàn toàn đủ dùng cho tiết học hàng ngày, trong khi các tính năng nâng cao và quy mô lớn dành cho tài khoản VIP Premium.
+### A. Luồng thao tác của Quản trị viên (Admin Dashboard)
+1. Quản trị viên vào **Bảng điều khiển Quản trị viên** -> Chọn tab mới: **"Trang chủ & Ghim nổi bật"**.
+2. Bảng quản trị hiển thị:
+   - Thẻ thống kê: *Tổng trò ghim trang chủ* (ví dụ: `6 / 8 trò tối ưu`), *Trò ghim Banner chính* (1 trò).
+   - Thanh công cụ: Tìm kiếm theo tên đề/chủ đề, lọc theo trạng thái (Đang ghim / Chưa ghim).
+   - Danh sách trò chơi dạng bảng & lưới trực quan:
+     - Nút gạt bật/tắt (Toggle Switch) hoặc nút ngôi sao: **"Ghim Trang chủ"**.
+     - Huy hiệu nhận diện trò chơi đang ghim Banner đỉnh trang.
+     - Nút xem trước nhanh nội dung bộ câu hỏi.
+3. Khi Quản trị viên bật/tắt ghim, dữ liệu được lưu tức thời và đồng bộ ngay với `HomePage`.
 
-### Quyết định 2: Cơ chế Lưu trữ & Xác thực Độc lập Đa Tầng (Hybrid Offline/Online)
-- **Giải pháp**: Xây dựng tầng Auth Service tích hợp:
-  - Hỗ trợ lưu trữ cục bộ (`localStorage` + `IndexedDB`) với đầy đủ tính năng mã hóa, duy trì phiên đăng nhập và ghi nhớ vai trò người dùng ngay cả khi không có kết nối Supabase Cloud.
-  - Nếu đã cấu hình Supabase Cloud (`VITE_SUPABASE_URL`), hệ thống tự động đồng bộ tài khoản người dùng và vai trò qua `user_metadata` hoặc bảng `user_profiles`.
-
-### Quyết định 3: Tự động Gán Quyền Admin cho Email Chủ sở hữu
-- **Giải pháp**: Bất kỳ khi nào email `tranthangit2025@gmail.com` đăng ký hoặc đăng nhập, hệ thống tự động nâng cấp vai trò thành `admin` vĩnh viễn.
-
----
-
-## 4. Technical Architecture & Data Strategy
-
-### A. Sơ đồ Kiến trúc & Phân quyền Hệ thống
+### B. Luồng hiển thị trên Trang chủ (`HomePage`)
+1. **Banner đỉnh trang**: Vẫn giữ nguyên vị trí danh dự dành cho trò chơi tiêu biểu nhất (có thể đổi trò nhanh qua Admin).
+2. **Khu vực "Trò chơi nổi bật & Yêu thích"**:
+   - Tab bộ lọc: "Tất cả gợi ý" (mặc định), "Yêu thích của bé" (❤️), "Chữ cái", "Làm quen với toán", "Khám phá xung quanh".
+   - **Thứ tự ưu tiên hiển thị**:
+     1. Trò do Quản trị viên ghim trên Trang chủ (`Admin Homepage Games`).
+     2. Trò người dùng đã bấm thả tim (`Favorite Games`).
+     3. Các trò chơi công khai khác nếu số lượng chưa đủ giới hạn hiển thị.
+   - **Giới hạn & Phân trang**:
+     - Hiển thị tối đa **8 trò chơi / trang** (lưới 4 cột trên Desktop, 2 cột trên Tablet/Mobile).
+     - Nếu có hơn 8 trò, hiển thị thanh phân trang thiếu nhi (Trang 1, 2, 3... hoặc nút "Xem thêm trò chơi") để không bao giờ làm tràn trang chủ.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│                        VUI HỌC CÙNG CÔ PLATFORM                         │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-           ┌────────────────────────┼────────────────────────┐
-           ▼                        ▼                        ▼
- ┌───────────────────┐    ┌───────────────────┐    ┌───────────────────┐
- │   HỌC SINH (GUEST)│    │ GIÁO VIÊN (MEMBER)│    │ QUẢN TRỊ (ADMIN)  │
- │ - Zero Auth       │    │ & TEACHER PREMIUM │    │                   │
- │ - Nhập PIN 6 số   │    │ - Đăng ký / Login │    │ - Dashboard Admin │
- │ - Trả lời / Vẽ thi│    │ - Member: <=20 câu│    │ - Quản lý Giáo viên│
- │ - Xem bảng xếp hạng│   │   <=2 phòng chơi  │    │   (Member<->VIP)  │
- └───────────────────┘    │ - Premium: Không  │    │ - Phê duyệt đề thi│
-                          │   giới hạn + B/cáo│    │ - Quản lý đề gốc  │
-                          └─────────┬─────────┘    └─────────┬─────────┘
-                                    │                        │
-                                    ▼                        ▼
-                          ┌────────────────────────────────────┐
-                          │         AuthContext & RBAC         │
-                          │  (Role, CurrentUser, Permissions)  │
-                          └─────────────────┬──────────────────┘
-                                            │
-                       ┌────────────────────┴────────────────────┐
-                       ▼                                         ▼
-            ┌──────────────────────┐                  ┌──────────────────────┐
-            │   GameStorage & DB   │                  │   Supabase Cloud     │
-            │ (Local & IndexedDB)  │                  │  (Khi có cấu hình)   │
-            │ - questions_library  │                  │ - user_profiles (RLS)│
-            │ - pending_approvals  │                  │ - games / history    │
-            │ - teacher_accounts   │                  └──────────────────────┘
-            └──────────────────────┘
+│  BẢNG ĐIỀU KHIỂN QUẢN TRỊ VIÊN                                         │
+│  [Duyệt bộ đề (0)]  [Giáo viên]  [★ Quản lý Trang chủ]  [Hệ thống]    │
+├────────────────────────────────────────────────────────────────────────┤
+│  ⚡ Đang ghim 6 trò ra trang chủ | Banner chính: Nhận biết chữ h, k     │
+│  🔍 Tìm kiếm trò chơi...                    [Tất cả] [Đã ghim]        │
+│                                                                        │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │ [Icon] Nhận biết chữ h, k  • 5-6 tuổi  [⭐ Banner] [✓ Ghim Home] │  │
+│  │ [Icon] Bé vui học toán 1-10 • 4-5 tuổi             [✓ Ghim Home] │  │
+│  │ [Icon] Đố vui động vật rừng • 3-4 tuổi             [+ Ghim Home] │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼ (Đồng bộ thời gian thực)
+┌────────────────────────────────────────────────────────────────────────┐
+│  TRANG CHỦ VUI HỌC CÙNG CÔ                                             │
+│  [ Banner chính tương tác ]                                            │
+│                                                                        │
+│  🌟 TRÒ CHƠI NỔI BẬT & ĐƯỢC YÊU THÍCH                                  │
+│  [⭐ Tất cả gợi ý] [❤️ Yêu thích (2)] [Chữ cái] [Toán]                │
+│                                                                        │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐                   │
+│  │ Trò ghim │ │ Trò ghim │ │ Trò thả  │ │ Trò thả  │ (Tối đa 8 trò)   │
+│  │ Admin 1  │ │ Admin 2  │ │ tim 1    │ │ tim 2    │                   │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘                   │
+│                                                                        │
+│         [  <  Trang 1 / 2  >  ]  hoặc  [ ✨ Xem thêm trò chơi ]        │
+└────────────────────────────────────────────────────────────────────────┘
 ```
-
-### B. Cấu trúc Mô hình Dữ liệu (TypeScript Entities)
-
-1. **User Role & Profile**:
-   ```typescript
-   export type UserRole = 'admin' | 'teacher_member' | 'teacher_premium' | 'student';
-
-   export interface UserQuota {
-     maxQuestionsPerGame: number; // 20 cho Member, Infinity cho Premium/Admin
-     maxActiveRooms: number;       // 2 cho Member, Infinity cho Premium/Admin
-     canExportAdvancedReport: boolean;
-     hasVipBadge: boolean;
-   }
-
-   export interface UserProfile {
-     id: string;
-     email: string;
-     fullName: string;
-     schoolName?: string;
-     role: UserRole;
-     status: 'active' | 'suspended';
-     createdAt: number;
-     lastLoginAt: number;
-     createdGamesCount: number;
-   }
-   ```
-
-2. **Question Set Visibility & Approval**:
-   ```typescript
-   export type GameVisibility = 'private' | 'pending_approval' | 'public';
-
-   export interface Game {
-     // ... các thuộc tính game hiện tại
-     authorId?: string;
-     authorName?: string;
-     authorEmail?: string;
-     visibility: GameVisibility; // 'private' | 'pending_approval' | 'public'
-     submittedForApprovalAt?: number;
-     approvedAt?: number;
-     approvedBy?: string;
-     rejectionReason?: string;
-     isSystemDefault?: boolean; // Bộ đề chuẩn của website do Admin quản lý
-   }
-   ```
-
-### C. Các luồng tương tác và kiểm soát hạn ngạch
-
-1. **Kiểm tra Hạn ngạch khi Tạo Câu Hỏi (Builder)**:
-   - Giáo viên Member thêm câu hỏi thứ 21 $\rightarrow$ Hiển thị thông báo thân thiện: *"Tài khoản Member hỗ trợ tối đa 20 câu hỏi/bộ đề. Nâng cấp Premium để tạo không giới hạn câu hỏi!"*.
-2. **Kiểm tra Hạn ngạch khi Mở Phòng (Host)**:
-   - Giáo viên Member mở phòng thứ 3 $\rightarrow$ Thông báo đóng bớt 1 trong 2 phòng đang mở trước hoặc nâng cấp VIP.
-3. **Giao diện Admin Dashboard**:
-   - Tab Quản lý Giáo viên: Xem danh sách tài khoản, chuyển đổi quyền `Member` $\leftrightarrow$ `Premium` $\leftrightarrow$ `Admin`, khóa/kích hoạt tài khoản.
-   - Tab Duyệt Bộ Đề: Xem trước chi tiết bộ đề chờ duyệt $\rightarrow$ Bấm **Phê duyệt** (công khai toàn website) hoặc **Từ chối** kèm lý do.
-4. **Học sinh tham gia**:
-   - Mở trang chủ $\rightarrow$ Nhập PIN 6 số $\rightarrow$ Tham gia thi đấu tức thì, không bị yêu cầu đăng nhập.
 
 ---
 
-## Verification & Testing Plan
+## 3. Quyết định sản phẩm & Đánh đổi kỹ thuật
 
-1. **Kiểm thử Giới hạn Hạn ngạch Member (20 câu, 2 phòng)**:
-   - Thử thêm câu hỏi trong Game Builder với tài khoản Member để kiểm tra giới hạn 20 câu và thanh đếm số câu hỏi (`x/20 câu`).
-   - Kiểm tra giới hạn 2 phòng chơi cùng lúc và tính năng xuất kết quả cơ bản.
-2. **Kiểm thử Tài khoản Premium**:
-   - Kiểm tra biểu tượng VIP trên Header, tạo trên 20 câu hỏi thành công, xuất báo cáo thi đấu nâng cao.
-3. **Kiểm thử Tài khoản Admin**:
-   - Đăng nhập với `tranthangit2025@gmail.com` $\rightarrow$ Truy cập Admin Dashboard $\rightarrow$ Nâng/hạ quyền giáo viên $\rightarrow$ Phê duyệt bộ đề gửi lên.
-4. **Kiểm thử Trải nghiệm Học sinh**:
-   - Mở màn hình tham gia phòng bằng mã PIN $\rightarrow$ Xác nhận không có bất kỳ rào cản đăng nhập nào.
-5. **Kiểm tra Biên dịch & Không có lỗi**:
-   - Chạy `compile_applet` để xác thực toàn bộ TypeScript và Component không có lỗi build.
+1. **Phương thức lưu trữ danh sách ghim trang chủ**:
+   - *Cách tiếp cận*: Mở rộng `gameStorage.ts` với key `vuihoc_admin_homepage_game_ids` được lưu trữ đồng bộ (IndexedDB + localStorage + Cloud sync API khi có kết nối backend).
+   - *Lý do*: Tương thích mượt mà với mô hình hiện tại của `vuihoc_featured_game_id`, phản hồi ngay lập tức không có độ trễ giật lag (zero latency), có thể pub/sub listener để cập nhật tức thì qua các component.
+2. **Quy tắc phân trang trên Trang chủ**:
+   - *Cách tiếp cận*: Giới hạn 8 trò/trang với thanh chuyển trang đánh số và nút Trước/Sau bo tròn màu sắc tươi sáng.
+   - *Lý do*: Giải quyết triệt để nỗi lo "kho trò chơi quá nhiều khiến giao diện bị quá dài", đảm bảo phụ huynh và các bé lướt trên máy tính bảng hoặc điện thoại không phải cuộn mỏi tay.
+3. **Phân quyền thao tác**:
+   - Chỉ hiển thị nút ghim/bỏ ghim trong `AdminDashboard` cho tài khoản Quản trị viên (`isAdmin === true` hoặc email `tranthangit2025@gmail.com`). Khách hoặc giáo viên thông thường chỉ có quyền thả tim yêu thích cá nhân.
+
+---
+
+## 4. Kiến trúc kỹ thuật & Kế hoạch sửa đổi
+
+### A. Dịch vụ lưu trữ (`src/services/gameStorage.ts`)
+- Khởi tạo key `ADMIN_HOMEPAGE_GAMES_KEY = 'vuihoc_admin_homepage_game_ids'`.
+- Thêm các hàm nghiệp vụ:
+  - `getAdminHomepageGameIds(): string[]` (Mặc định khởi tạo các trò tiêu biểu nếu chưa có).
+  - `setAdminHomepageGameIds(ids: string[]): void`
+  - `toggleAdminHomepageGameId(gameId: string): boolean`
+  - `subscribeAdminHomepageGames(listener: (ids: string[]) => void): () => void`
+
+### B. Bảng điều khiển Quản trị viên (`src/components/admin/AdminDashboard.tsx`)
+- Bổ sung tab `homepage` ("Ghim Trang chủ") vào thanh điều hướng tab Admin.
+- Thiết kế giao diện quản lý ghim:
+  - Danh sách toàn bộ trò chơi hợp lệ (bao gồm cả trò hệ thống và trò của giáo viên đã được duyệt).
+  - Nút chuyển trạng thái ghim lên trang chủ (On/Off) với âm thanh thông báo vui nhộn (`sounds.playCorrect()`).
+  - Nút chọn nhanh làm "Trò chơi Banner chính".
+  - Thống kê số lượng trò đang kích hoạt hiển thị ngoài trang chủ.
+
+### C. Trang chủ (`src/pages/HomePage.tsx`)
+- Lắng nghe sự thay đổi của danh sách `adminHomepageGameIds`.
+- Thuật toán sắp xếp danh sách showcase:
+  - **Ưu tiên 1**: Trò chơi nằm trong danh sách Admin ghim trang chủ.
+  - **Ưu tiên 2**: Trò chơi nằm trong danh sách yêu thích của người dùng hiện tại (`favoriteIds`).
+  - **Ưu tiên 3**: Trò chơi công khai khác theo thứ tự ngày tạo/chủ đề.
+- Cơ chế phân trang:
+  - `showcasePage` (mặc định trang 1), `GAMES_PER_PAGE = 8`.
+  - Nút chuyển trang sinh động phong cách mầm non: số trang, nút chuyển trang trước/sau.
+
+### D. Kiểm thử & Đảm bảo chất lượng
+- Chạy `compile_applet` và `lint_applet` kiểm tra cú pháp TypeScript và Tailwind CSS.
+- Kiểm tra tính nhất quán giữa tài khoản Quản trị viên và người dùng khách.

@@ -14,6 +14,7 @@ import {
   Undo2,
   ImageIcon,
   X,
+  CheckCircle2,
 } from 'lucide-react';
 import { speakVietnamese, stopSpeaking, isSpeechSupported, unlockSpeechAudio } from '../../utils/speechVoice';
 
@@ -54,9 +55,17 @@ export const PlayerOpenEndedQuestion: React.FC<PlayerOpenEndedQuestionProps> = (
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const isDrawingRef = useRef(false);
-  const hasDrawnRef = useRef(false);
-  const [hasDrawnSomething, setHasDrawnSomething] = useState(false);
-  const latestDrawingDataUrlRef = useRef<string>(existingAnswer?.openEnded?.drawingDataUrl || '');
+
+  const effectiveRoom = (roomCode || realtime.getCurrentRoomCode() || (typeof window !== 'undefined' ? localStorage.getItem('vuihoc_player_room') : '') || '').trim().toUpperCase();
+  const effectiveTeam = (teamId || realtime.getCurrentTeamId() || (typeof window !== 'undefined' ? localStorage.getItem('vuihoc_player_team_id') : '') || '').trim();
+  const storageKey = `vuihoc_drawing_${effectiveRoom}_${effectiveTeam}_${questionIndex}`;
+
+  const initialDrawing = existingAnswer?.openEnded?.drawingDataUrl ||
+    (typeof window !== 'undefined' ? (localStorage.getItem(storageKey) || '') : '');
+
+  const hasDrawnRef = useRef(Boolean(initialDrawing && initialDrawing.length > 50));
+  const [hasDrawnSomething, setHasDrawnSomething] = useState(Boolean(initialDrawing && initialDrawing.length > 50));
+  const latestDrawingDataUrlRef = useRef<string>(initialDrawing);
   const lastSyncedDrawingRef = useRef<string>('');
 
   const [activeColor, setActiveColor] = useState('#1e293b');
@@ -136,6 +145,11 @@ export const PlayerOpenEndedQuestion: React.FC<PlayerOpenEndedQuestionProps> = (
             const data = offscreen.toDataURL('image/png');
             if (data && data.length > 50) {
               latestDrawingDataUrlRef.current = data;
+              if (typeof window !== 'undefined' && storageKey) {
+                try {
+                  localStorage.setItem(storageKey, data);
+                } catch {}
+              }
               return data;
             }
           }
@@ -147,40 +161,45 @@ export const PlayerOpenEndedQuestion: React.FC<PlayerOpenEndedQuestionProps> = (
       const directData = canvas.toDataURL('image/png');
       if (directData && directData.length > 50) {
         latestDrawingDataUrlRef.current = directData;
+        if (typeof window !== 'undefined' && storageKey) {
+          try {
+            localStorage.setItem(storageKey, directData);
+          } catch {}
+        }
         return directData;
       }
     } catch (err) {
       console.warn('[Canvas] toDataURL error:', err);
     }
-    return latestDrawingDataUrlRef.current || '';
+    return latestDrawingDataUrlRef.current || (typeof window !== 'undefined' ? localStorage.getItem(storageKey) || '' : '');
   };
 
   // Auto-sync draft whenever kid draws or types so server has it authoritatively at any millisecond
   const syncDraftToServer = (explicitDataUrl?: string) => {
-    if (hasSubmittedRef.current) return;
     const currentDrawing = explicitDataUrl !== undefined ? explicitDataUrl : captureCanvas();
     const currentText = textAnswerRef.current.trim();
-    const effectiveRoom = (roomCode || realtime.getCurrentRoomCode() || (typeof window !== 'undefined' ? localStorage.getItem('vuihoc_player_room') : '') || '').trim().toUpperCase();
-    const effectiveTeam = (teamId || realtime.getCurrentTeamId() || (typeof window !== 'undefined' ? localStorage.getItem('vuihoc_player_team_id') : '') || '').trim();
 
     if (effectiveRoom && effectiveTeam) {
-      realtime.saveOpenEndedDraft(effectiveRoom, effectiveTeam, questionIndex, currentText, currentDrawing, Boolean(hasDrawnRef.current));
+      realtime.saveOpenEndedDraft(effectiveRoom, effectiveTeam, questionIndex, currentText, currentDrawing, Boolean(hasDrawnRef.current || (currentDrawing && currentDrawing.length > 50)));
       lastSyncedDrawingRef.current = currentDrawing;
     }
   };
 
-  // Immediate flush & submit helper (used ONLY when teacher clicks "Kết thúc câu" or on unmount)
+  // Immediate flush & submit helper (used when teacher clicks "Kết thúc câu", child clicks "Nộp bài", or on unmount)
   const flushAndSubmit = () => {
-    if (hasSubmittedRef.current) return;
     hasSubmittedRef.current = true;
     setHasSubmitted(true);
-    const finalDrawing = captureCanvas();
+    let finalDrawing = captureCanvas();
+    if (!finalDrawing || finalDrawing.length < 50) {
+      finalDrawing = latestDrawingDataUrlRef.current;
+      if ((!finalDrawing || finalDrawing.length < 50) && typeof window !== 'undefined') {
+        finalDrawing = localStorage.getItem(storageKey) || '';
+      }
+    }
     const finalText = textAnswerRef.current.trim();
-    const effectiveRoom = (roomCode || realtime.getCurrentRoomCode() || (typeof window !== 'undefined' ? localStorage.getItem('vuihoc_player_room') : '') || '').trim().toUpperCase();
-    const effectiveTeam = (teamId || realtime.getCurrentTeamId() || (typeof window !== 'undefined' ? localStorage.getItem('vuihoc_player_team_id') : '') || '').trim();
 
     if (effectiveRoom && effectiveTeam) {
-      realtime.saveOpenEndedDraft(effectiveRoom, effectiveTeam, questionIndex, finalText, finalDrawing, Boolean(hasDrawnRef.current));
+      realtime.saveOpenEndedDraft(effectiveRoom, effectiveTeam, questionIndex, finalText, finalDrawing, Boolean(hasDrawnRef.current || (finalDrawing && finalDrawing.length > 50)));
     }
     onSubmitOpenEnded(finalText, finalDrawing);
   };
@@ -391,6 +410,11 @@ export const PlayerOpenEndedQuestion: React.FC<PlayerOpenEndedQuestionProps> = (
     setHasDrawnSomething(false);
     hasDrawnRef.current = false;
     latestDrawingDataUrlRef.current = '';
+    if (typeof window !== 'undefined' && storageKey) {
+      try {
+        localStorage.removeItem(storageKey);
+      } catch {}
+    }
     syncDraftToServer('');
   };
 
@@ -457,6 +481,14 @@ export const PlayerOpenEndedQuestion: React.FC<PlayerOpenEndedQuestionProps> = (
     isDrawingRef.current = false;
     saveState();
     const data = captureCanvas();
+    if (data && data.length > 50) {
+      latestDrawingDataUrlRef.current = data;
+      if (typeof window !== 'undefined' && storageKey) {
+        try {
+          localStorage.setItem(storageKey, data);
+        } catch {}
+      }
+    }
     syncDraftToServer(data);
   };
 
@@ -804,6 +836,24 @@ export const PlayerOpenEndedQuestion: React.FC<PlayerOpenEndedQuestionProps> = (
               >
                 <RotateCcw className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                 <span className="hidden sm:inline">Vẽ lại</span>
+              </button>
+
+              {/* Nộp bài button */}
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.playClick();
+                  flushAndSubmit();
+                }}
+                className={`p-1.5 px-3 rounded-xl border text-xs font-black flex items-center gap-1.5 transition cursor-pointer shadow-xs ${
+                  hasSubmitted
+                    ? 'bg-emerald-100 border-emerald-300 text-emerald-800'
+                    : 'bg-emerald-500 hover:bg-emerald-600 text-white border-emerald-600 active:scale-95'
+                }`}
+                title="Nộp bài vẽ cho cô"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <span>{hasSubmitted ? 'Đã nộp bài' : 'Nộp bài'}</span>
               </button>
             </div>
           )}

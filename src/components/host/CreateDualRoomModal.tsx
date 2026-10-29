@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Game } from '../../types/game';
-import { getAllGames } from '../../services/gameStorage';
+import { getAllGames, isGameVisibleToUser } from '../../services/gameStorage';
 import { DEFAULT_GAMES } from '../../data/defaultGames';
 import { GameCoverIllustration } from '../games/GameCoverIllustration';
 import { sounds } from '../../utils/sound';
+import { useAuth } from '../../context/AuthContext';
 import {
   X,
   Layers,
@@ -28,7 +29,11 @@ export const CreateDualRoomModal: React.FC<CreateDualRoomModalProps> = ({
   onClose,
   onConfirmDualRoom,
 }) => {
-  const allGames = getAllGames();
+  const { currentUser, isAdmin } = useAuth();
+  const allGames = useMemo(() => {
+    return getAllGames().filter((g) => isGameVisibleToUser(g, currentUser, isAdmin));
+  }, [currentUser, isAdmin]);
+
   const [selectedGameA, setSelectedGameA] = useState<Game>(() => allGames[0] || DEFAULT_GAMES[0]);
   const [selectedGameB, setSelectedGameB] = useState<Game>(() => allGames[1] || DEFAULT_GAMES[1] || allGames[0]);
   const [activeSlot, setActiveSlot] = useState<'A' | 'B'>('A');

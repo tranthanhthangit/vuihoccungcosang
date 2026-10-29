@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Play,
   Sparkles,
@@ -9,6 +9,12 @@ import {
   X,
   CheckCircle2,
   User,
+  Heart,
+  BookOpen,
+  Gamepad2,
+  Compass,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { sounds } from '../utils/sound';
 import { DEFAULT_GAMES } from '../data/defaultGames';
@@ -18,8 +24,15 @@ import {
   getFeaturedGameId,
   setFeaturedGameId,
   subscribeGames,
-  subscribeFeaturedGame
+  subscribeFeaturedGame,
+  isGameVisibleToUser,
+  getFavoriteGameIds,
+  toggleFavoriteGameId,
+  subscribeFavorites,
+  getAdminHomepageGameIds,
+  subscribeAdminHomepageGames,
 } from '../services/gameStorage';
+import { GameCoverIllustration } from '../components/games/GameCoverIllustration';
 import { SelectRoomTypeModal } from '../components/host/SelectRoomTypeModal';
 import { useAuth } from '../context/AuthContext';
 
@@ -42,9 +55,14 @@ export const HomePage: React.FC<HomePageProps> = ({
   onViewHistory,
   onOpenProfile,
 }) => {
-  const { currentUser } = useAuth();
+  const { currentUser, isAdmin } = useAuth();
   const [allGamesList, setAllGamesList] = useState<Game[]>(() => getAllGames());
   const [featuredId, setFeaturedId] = useState<string>(() => getFeaturedGameId());
+  const [favoriteIds, setFavoriteIds] = useState<string[]>(() => getFavoriteGameIds());
+  const [adminHomepageIds, setAdminHomepageIds] = useState<string[]>(() => getAdminHomepageGameIds());
+  const [activeFilterTab, setActiveFilterTab] = useState<'all' | 'favorite' | 'letters' | 'math' | 'explore'>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const GAMES_PER_PAGE = 8;
   const [toastFeedback, setToastFeedback] = useState<string | null>(null);
   const [isSelectFeaturedModalOpen, setIsSelectFeaturedModalOpen] = useState(false);
   const [isSelectRoomTypeModalOpen, setIsSelectRoomTypeModalOpen] = useState(false);
@@ -54,15 +72,32 @@ export const HomePage: React.FC<HomePageProps> = ({
   useEffect(() => {
     const unsubGames = subscribeGames((updated) => setAllGamesList(updated));
     const unsubFeatured = subscribeFeaturedGame((newId) => setFeaturedId(newId));
+    const unsubFavs = subscribeFavorites((newFavs) => setFavoriteIds(newFavs));
+    const unsubAdminHp = subscribeAdminHomepageGames((ids) => setAdminHomepageIds(ids));
     return () => {
       unsubGames();
       unsubFeatured();
+      unsubFavs();
+      unsubAdminHp();
     };
   }, []);
 
-  // Determine the active featured game
+  // Reset page when category tab changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeFilterTab]);
+
+  // Filter games accessible to the current user (strictly hide private/pending from strangers)
+  const visibleGamesList = useMemo(() => {
+    return allGamesList.filter((g) => isGameVisibleToUser(g, currentUser, isAdmin));
+  }, [allGamesList, currentUser, isAdmin]);
+
+  // Determine the active featured game (must be visible to user, else fallback to safe default)
+  const candidateFeatured = allGamesList.find((g) => g.id === featuredId);
   const featuredGame: Game =
-    allGamesList.find((g) => g.id === featuredId) ||
+    (candidateFeatured && isGameVisibleToUser(candidateFeatured, currentUser, isAdmin)
+      ? candidateFeatured
+      : null) ||
     DEFAULT_GAMES.find((g) => g.id === featuredId) ||
     DEFAULT_GAMES[0];
 
@@ -75,468 +110,753 @@ export const HomePage: React.FC<HomePageProps> = ({
     setTimeout(() => setToastFeedback(null), 3500);
   };
 
-  const filteredGamesForModal = allGamesList.filter((g) =>
+  const handleToggleFavorite = (game: Game, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    sounds.playClick();
+    const isNowFav = toggleFavoriteGameId(game.id);
+    setToastFeedback(
+      isNowFav
+        ? `❤️ Đã thêm "${game.title}" vào danh sách yêu thích!`
+        : `Đã bỏ "${game.title}" khỏi danh sách yêu thích.`
+    );
+    setTimeout(() => setToastFeedback(null), 3000);
+  };
+
+  const handlePinToBanner = (game: Game, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    handleSelectFeatured(game);
+  };
+
+  // Filter games for modal
+  const filteredGamesForModal = visibleGamesList.filter((g) =>
     (g.title || '').toLowerCase().includes(featuredSearch.toLowerCase()) ||
     (g.category || '').toLowerCase().includes(featuredSearch.toLowerCase())
   );
 
+  // Favorite games list
+  const favoriteGames = useMemo(() => {
+    return visibleGamesList.filter((g) => favoriteIds.includes(g.id));
+  }, [visibleGamesList, favoriteIds]);
+
+  // Showcase games for homepage
+  const displayedShowcaseGames = useMemo(() => {
+    let list = [...visibleGamesList];
+
+    if (activeFilterTab === 'favorite') {
+      return favoriteGames;
+    }
+
+    if (activeFilterTab === 'letters') {
+      list = list.filter((g) => {
+        const cat = (g.category || '').toLowerCase();
+        const title = (g.title || '').toLowerCase();
+        return cat.includes('chữ') || title.includes('chữ') || title.includes('tiếng việt');
+      });
+    } else if (activeFilterTab === 'math') {
+      list = list.filter((g) => {
+        const cat = (g.category || '').toLowerCase();
+        const title = (g.title || '').toLowerCase();
+        return cat.includes('toán') || title.includes('toán') || title.includes('số') || title.includes('đếm');
+      });
+    } else if (activeFilterTab === 'explore') {
+      list = list.filter((g) => {
+        const cat = (g.category || '').toLowerCase();
+        const title = (g.title || '').toLowerCase();
+        return (
+          cat.includes('động vật') ||
+          cat.includes('môi trường') ||
+          cat.includes('kỹ năng') ||
+          title.includes('nghề') ||
+          title.includes('con') ||
+          title.includes('khám phá')
+        );
+      });
+    }
+
+    // Sort priority as requested by Admin:
+    // 1. Featured game on top banner
+    // 2. Admin curated & pinned games on homepage (adminHomepageIds)
+    // 3. User favorited games (favoriteIds)
+    // 4. Play count or creation time
+    return list.sort((a, b) => {
+      if (a.id === featuredId) return -1;
+      if (b.id === featuredId) return 1;
+
+      const aAdminPinned = adminHomepageIds.includes(a.id) ? 1 : 0;
+      const bAdminPinned = adminHomepageIds.includes(b.id) ? 1 : 0;
+      if (aAdminPinned !== bAdminPinned) return bAdminPinned - aAdminPinned;
+
+      const aFav = favoriteIds.includes(a.id) ? 1 : 0;
+      const bFav = favoriteIds.includes(b.id) ? 1 : 0;
+      if (aFav !== bFav) return bFav - aFav;
+
+      return (b.playCount || 0) - (a.playCount || 0);
+    });
+  }, [visibleGamesList, activeFilterTab, favoriteGames, featuredId, favoriteIds, adminHomepageIds]);
+
+  const totalPages = Math.ceil(displayedShowcaseGames.length / GAMES_PER_PAGE) || 1;
+  const paginatedGames = useMemo(() => {
+    const start = (currentPage - 1) * GAMES_PER_PAGE;
+    return displayedShowcaseGames.slice(start, start + GAMES_PER_PAGE);
+  }, [displayedShowcaseGames, currentPage]);
+
   return (
-    <div className="max-w-6xl mx-auto px-4 py-4 sm:py-8 select-none">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 select-none">
       {/* ---------------------------------------------------- */}
-      {/* HERO BANNER: SLOGAN + FEATURED GAME CARD             */}
+      {/* HERO BANNER MATCHING MOCKUP ARTWORK EXACTLY          */}
       {/* ---------------------------------------------------- */}
-      <div className="relative overflow-hidden rounded-[32px] sm:rounded-[40px] bg-gradient-to-r from-sky-100/90 via-amber-50/80 to-pink-100/90 border-2 border-white shadow-xl shadow-sky-100/50 p-6 sm:p-10 mb-8 backdrop-blur-sm">
-        {/* Soft background pastel cloud blurs */}
-        <div className="absolute -top-12 -left-12 w-64 h-64 bg-amber-200/40 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-12 right-24 w-72 h-72 bg-pink-200/40 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute top-1/2 left-1/3 w-80 h-80 bg-sky-200/30 rounded-full blur-3xl pointer-events-none" />
+      {/* ---------------------------------------------------- */}
+      {/* HERO BANNER MATCHING MOCKUP ARTWORK EXACTLY          */}
+      {/* ---------------------------------------------------- */}
+      <div className="relative overflow-hidden rounded-[28px] sm:rounded-[36px] border-2 border-white/90 shadow-xl shadow-sky-100/70 mb-6 sm:mb-8 bg-sky-200">
+        {/* Desktop View: Full Preschool Artwork Banner with Real Interactive Elements */}
+        <div className="hidden lg:block relative w-full overflow-hidden">
+          <img
+            src="/assets/aistudio/banner_full.png"
+            alt="Cùng nhau khám phá và học thật vui! - Vui Học Cùng Cô"
+            className="w-full h-auto object-cover block select-none pointer-events-none"
+          />
 
-        <div className="relative z-10 flex flex-col lg:flex-row items-center justify-between gap-6 sm:gap-8">
-          {/* Left: Clean typography & preschool slogan (removed awkward vector icon as requested) */}
-          <div className="flex flex-col items-center sm:items-start text-center sm:text-left flex-1 max-w-xl">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/90 border border-amber-200 text-amber-900 text-xs sm:text-sm font-black shadow-xs mb-3">
-              <Sparkles className="w-4 h-4 text-amber-500 animate-spin-slow" />
-              <span>Thế giới học mầm non</span>
+          {/* Interactive Button: Tạo phòng 2 bộ đề (Mới) */}
+          <button
+            type="button"
+            onClick={() => {
+              sounds.playClick();
+              if (onCreateDualRoom) {
+                onCreateDualRoom();
+              } else {
+                setIsSelectRoomTypeModalOpen(true);
+              }
+            }}
+            style={{ left: '3.0%', top: '78.8%', width: '23.8%', height: '14.2%' }}
+            className="absolute rounded-full bg-gradient-to-r from-[#ff2872] via-[#ff3b83] to-[#ff2872] text-white shadow-xl shadow-pink-600/40 hover:brightness-105 active:scale-[0.98] transition-all flex items-center justify-center gap-2 sm:gap-2.5 px-3 py-1 cursor-pointer border-2 border-white/80 group overflow-hidden z-20"
+            title="Tạo phòng chơi 2 bộ đề (Mới)"
+            aria-label="Tạo phòng 2 bộ đề"
+          >
+            <span className="w-6 h-6 xl:w-7 xl:h-7 rounded-full bg-white/25 flex items-center justify-center text-white shrink-0 group-hover:scale-110 transition-transform shadow-inner">
+              <Play className="w-3.5 h-3.5 xl:w-4 xl:h-4 fill-white translate-x-0.5" />
+            </span>
+            <span className="font-black text-xs xl:text-sm 2xl:text-base tracking-wide whitespace-nowrap drop-shadow-sm">
+              Tạo phòng 2 bộ đề
+            </span>
+            <span className="bg-[#ffcb05] text-[#8c3500] font-black text-[10px] xl:text-xs px-2 py-0.5 rounded-full shadow-xs shrink-0 uppercase tracking-wider">
+              Mới
+            </span>
+          </button>
+
+          {/* Real Interactive Card: Trò chơi mới nhất / Trò chơi nổi bật */}
+          <div
+            style={{
+              left: '72.8%',
+              top: '11.0%',
+              width: '25.4%',
+              height: '81.2%',
+            }}
+            className="absolute bg-white rounded-2xl xl:rounded-[28px] p-3 xl:p-4 shadow-xl border-2 border-white flex flex-col justify-between z-20 select-auto"
+          >
+            {/* Header: Tag vàng & tia trang trí */}
+            <div className="flex items-center justify-between">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#ff9d00] text-white font-black text-xs shadow-xs">
+                <Star className="w-3.5 h-3.5 fill-white" />
+                <span>Trò chơi mới nhất</span>
+              </div>
+              <div className="flex gap-0.5 text-amber-400 font-black text-sm select-none pr-1">
+                <span>\</span><span>|</span><span>/</span>
+              </div>
             </div>
 
-            <div className="text-3xl sm:text-4xl md:text-5xl font-black tracking-tight leading-tight select-none">
-              <span className="text-sky-600 block">Cùng nhau</span>
-              <span className="text-rose-500 flex items-center justify-center sm:justify-start gap-2 mt-1">
-                khám phá <span className="text-amber-400 text-2xl sm:text-3xl animate-bounce">✨</span>
-              </span>
-              <span className="text-emerald-600 flex items-center justify-center sm:justify-start gap-2 mt-1 text-2xl sm:text-3xl md:text-4xl">
-                và học thật vui! <span className="text-rose-500 text-2xl sm:text-3xl">💖</span>
-              </span>
-            </div>
+            {/* Content: Thumbnail, Tên trò chơi, Số câu, Tuổi & Nút Chơi ngay */}
+            <div className="flex items-center gap-3 my-auto">
+              <div className="w-14 h-14 xl:w-16 xl:h-16 rounded-2xl overflow-hidden bg-gradient-to-br from-sky-400 to-blue-500 shadow-sm shrink-0 flex items-center justify-center border border-sky-100">
+                {featuredGame.coverImage ? (
+                  <img
+                    src={featuredGame.coverImage}
+                    alt={featuredGame.title}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center bg-[#1ea7fd] text-white font-black">
+                    <span className="text-lg xl:text-xl tracking-tighter">abc</span>
+                  </div>
+                )}
+              </div>
 
-            <p className="mt-3 text-xs sm:text-sm md:text-base font-bold text-slate-600 leading-relaxed max-w-md">
-              Hệ thống trò chơi tương tác giáo dục mầm non sinh động, trực quan giúp các bé hào hứng học tập và phát triển toàn diện.
-            </p>
-
-            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mt-4">
-              <span className="px-3 py-1 rounded-full bg-sky-100/80 text-sky-800 text-xs font-black border border-sky-200/70">
-                🎨 Trực quan sinh động
-              </span>
-              <span className="px-3 py-1 rounded-full bg-emerald-100/80 text-emerald-800 text-xs font-black border border-emerald-200/70">
-                🎵 Âm thanh vui tươi
-              </span>
-              <span className="px-3 py-1 rounded-full bg-pink-100/80 text-pink-800 text-xs font-black border border-pink-200/70">
-                🌟 Thi đua sôi nổi
-              </span>
-            </div>
-
-            {/* Quick button to create 2-question-set room inside Hero Banner */}
-            {onCreateDualRoom && (
-              <div className="mt-5 flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    sounds.playClick();
-                    onCreateDualRoom();
-                  }}
-                  className="px-4 sm:px-5 py-2.5 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-black text-xs sm:text-sm flex items-center gap-2 shadow-lg shadow-purple-200 transition active:scale-95 cursor-pointer"
-                  title="Tạo phòng chơi kết hợp 2 bộ câu hỏi và chỉ định từng đội"
+              <div className="flex-1 min-w-0 flex flex-col justify-between">
+                <h4
+                  className="font-black text-sky-950 text-xs xl:text-sm 2xl:text-base leading-tight line-clamp-1"
+                  title={featuredGame.title}
                 >
-                  <span className="text-amber-300 text-base">⚡</span>
-                  <span>Tạo phòng 2 bộ đề</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-400 text-slate-900 font-black uppercase shadow-2xs">
-                    Mới
-                  </span>
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Right: Featured Game Card (Trò chơi nổi bật) with slanted Pin 📌 */}
-          <div className="relative shrink-0 w-full sm:w-auto max-w-sm">
-            {/* Cute Purple Pushpin */}
-            <div className="absolute -top-3.5 -right-2 z-20 text-2xl filter drop-shadow-md select-none transform rotate-12">
-              📌
-            </div>
-
-            {/* Pinned Card Body */}
-            <div className="relative bg-white rounded-3xl p-5 border-2 border-amber-100 shadow-xl shadow-amber-900/5 overflow-hidden group">
-              {/* Star Ribbon on top-left of card */}
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-amber-400 to-amber-500 text-white font-black text-[11px] shadow-xs mb-3">
-                <Star className="w-3.5 h-3.5 fill-current" />
-                <span>Trò chơi nổi bật</span>
-              </div>
-
-              {/* Game Info Row */}
-              <div className="flex items-center gap-4 mb-4">
-                {/* Visual Game Badge (Clean icon, no awkward SVG) */}
-                <div className={`w-20 h-20 sm:w-22 sm:h-22 rounded-2xl flex items-center justify-center text-3xl sm:text-4xl shrink-0 shadow-sm border ${
-                  featuredGame.theme === 'rose'
-                    ? 'bg-gradient-to-br from-rose-100 to-pink-100 border-rose-200 text-rose-600'
-                    : featuredGame.theme === 'emerald'
-                    ? 'bg-gradient-to-br from-emerald-100 to-teal-100 border-emerald-200 text-emerald-600'
-                    : featuredGame.theme === 'cyan'
-                    ? 'bg-gradient-to-br from-cyan-100 to-sky-100 border-cyan-200 text-sky-600'
-                    : 'bg-gradient-to-br from-amber-100 to-yellow-100 border-amber-200 text-amber-600'
-                }`}>
-                  {featuredGame.category === 'Làm quen với toán'
-                    ? '🔢'
-                    : featuredGame.category === 'Khám phá khoa học'
-                    ? '🔬'
-                    : featuredGame.category === 'Giáo dục âm nhạc'
-                    ? '🎵'
-                    : '🔤'}
-                </div>
-
-                {/* Title & Age info */}
-                <div className="min-w-0">
-                  <h3 className="text-base sm:text-lg font-black text-slate-900 leading-snug line-clamp-2">
-                    {featuredGame.title}
-                  </h3>
-                  <span className="text-xs font-bold text-slate-400 block mt-1">
-                    {featuredGame.targetAge || '5 – 6 tuổi'} · {featuredGame.questions?.length || 0} câu
-                  </span>
-
-                  {/* Play Button */}
+                  {featuredGame.title}
+                </h4>
+                <p className="text-[11px] xl:text-xs font-bold text-slate-500 mt-0.5 truncate">
+                  {featuredGame.targetAge || '5 - 6 tuổi'} · {featuredGame.questions?.length || 5} câu
+                </p>
+                <div className="mt-1.5">
                   <button
                     type="button"
                     onClick={() => {
                       sounds.playCorrect();
                       onQuickPlay(featuredGame);
                     }}
-                    className="mt-2.5 px-4 sm:px-5 py-2 rounded-full bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white font-black text-xs sm:text-sm flex items-center gap-1.5 shadow-md shadow-rose-200 transition active:scale-95 cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-gradient-to-r from-[#ff2a75] to-[#ff438b] hover:from-[#e91e63] hover:to-[#ff2a75] text-white font-black text-xs xl:text-sm shadow-md shadow-pink-500/30 active:scale-95 transition-all cursor-pointer"
+                    title={`Chơi ngay: ${featuredGame.title}`}
                   >
-                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <Play className="w-3.5 h-3.5 fill-white translate-x-0.5" />
                     <span>Chơi ngay</span>
                   </button>
                 </div>
               </div>
+            </div>
 
-              {/* Teacher option: Change / Mark Featured Game Button */}
-              <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-400">
-                  {featuredGame.category || 'Mầm non'}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    sounds.playClick();
-                    setIsSelectFeaturedModalOpen(true);
-                  }}
-                  className="text-[11px] font-black text-indigo-600 hover:text-indigo-800 flex items-center gap-1 hover:underline cursor-pointer"
-                  title="Cô có thể chọn bất kỳ trò chơi nào để hiển thị nổi bật trên banner này"
-                >
-                  <Star className="w-3 h-3 text-amber-500 fill-current" />
-                  <span>Đổi trò nổi bật</span>
-                </button>
-              </div>
+            {/* Footer links: Chơi các trò khác / Đổi gợi ý nổi bật */}
+            <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] xl:text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.playClick();
+                  onOpenGamesBank();
+                }}
+                className="text-sky-600 hover:text-sky-700 hover:underline cursor-pointer transition"
+              >
+                Chơi các
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.playClick();
+                  setIsSelectFeaturedModalOpen(true);
+                }}
+                className="text-amber-500 hover:text-amber-600 font-black flex items-center gap-1 cursor-pointer transition hover:underline"
+                title="Đổi hoặc chọn trò chơi nổi bật"
+              >
+                <span>⭐</span>
+                <span>Gợi ý nổi bật</span>
+              </button>
             </div>
           </div>
         </div>
+
+        {/* Mobile & Tablet Responsive View */}
+        <div className="block lg:hidden relative w-full overflow-hidden">
+          <img
+            src="/assets/aistudio/mobile_banner_card.png"
+            alt="Cùng nhau khám phá và học thật vui! - Vui Học Cùng Cô"
+            className="w-full h-auto object-cover block select-none pointer-events-none"
+          />
+
+          {/* Interactive Button: Tạo phòng 2 bộ đề (Mới) on Mobile */}
+          <button
+            type="button"
+            onClick={() => {
+              sounds.playClick();
+              if (onCreateDualRoom) {
+                onCreateDualRoom();
+              } else {
+                setIsSelectRoomTypeModalOpen(true);
+              }
+            }}
+            style={{ left: '2.8%', top: '77.0%', width: '45.0%', height: '16.5%' }}
+            className="absolute rounded-full bg-gradient-to-r from-[#ff2872] via-[#ff3b83] to-[#ff2872] text-white shadow-lg shadow-pink-600/40 hover:brightness-105 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 px-2.5 py-1 cursor-pointer border-2 border-white/60 group overflow-hidden z-20"
+            title="Tạo phòng 2 bộ đề (Mới)"
+            aria-label="Tạo phòng 2 bộ đề"
+          >
+            <span className="w-5 h-5 rounded-full bg-white/25 flex items-center justify-center text-white shrink-0">
+              <Play className="w-3 h-3 fill-white translate-x-0.5" />
+            </span>
+            <span className="font-black text-[11px] sm:text-xs tracking-wide whitespace-nowrap drop-shadow-sm">
+              Tạo phòng 2 bộ đề
+            </span>
+            <span className="bg-[#ffcb05] text-[#8c3500] font-black text-[9px] px-1.5 py-0.5 rounded-full shadow-xs shrink-0 uppercase">
+              Mới
+            </span>
+          </button>
+        </div>
       </div>
 
-      {/* Member quick access bar when logged in */}
-      {currentUser && onOpenProfile && (
-        <div className="bg-white rounded-3xl border border-indigo-100 p-4 mb-6 shadow-2xs flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black text-sm shadow-xs ${
-              currentUser.role === 'admin'
-                ? 'bg-rose-600 text-white'
-                : currentUser.role === 'teacher_premium'
-                ? 'bg-amber-400 text-slate-900'
-                : 'bg-indigo-600 text-white'
-            }`}>
-              {currentUser.role === 'admin' ? '👑' : currentUser.role === 'teacher_premium' ? '⭐' : currentUser.fullName.charAt(0).toUpperCase()}
+      {/* Mobile-only Interactive Featured Game Card */}
+      <div className="block lg:hidden mb-6 bg-white rounded-2xl p-3.5 shadow-md border-2 border-amber-100">
+        <div className="flex items-center justify-between mb-2">
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#ff9d00] text-white font-black text-[11px] shadow-xs">
+            <Star className="w-3 h-3 fill-white" />
+            <span>Trò chơi mới nhất</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              sounds.playClick();
+              setIsSelectFeaturedModalOpen(true);
+            }}
+            className="text-amber-600 hover:text-amber-700 font-black text-xs flex items-center gap-1 cursor-pointer"
+          >
+            <span>⭐</span>
+            <span>Gợi ý nổi bật</span>
+          </button>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-xl overflow-hidden bg-gradient-to-br from-sky-400 to-blue-500 shadow-xs shrink-0 flex items-center justify-center text-white font-black border border-sky-100">
+            {featuredGame.coverImage ? (
+              <img
+                src={featuredGame.coverImage}
+                alt={featuredGame.title}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <span className="text-base tracking-tighter">abc</span>
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <h4 className="font-black text-sky-950 text-sm truncate" title={featuredGame.title}>
+              {featuredGame.title}
+            </h4>
+            <p className="text-[11px] font-bold text-slate-500">
+              {featuredGame.targetAge || '5 - 6 tuổi'} · {featuredGame.questions?.length || 5} câu
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              sounds.playCorrect();
+              onQuickPlay(featuredGame);
+            }}
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-gradient-to-r from-[#ff2a75] to-[#ff438b] text-white font-black text-xs shadow-md shadow-pink-500/25 shrink-0 active:scale-95 transition cursor-pointer"
+          >
+            <Play className="w-3 h-3 fill-white" />
+            <span>Chơi ngay</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ---------------------------------------------------- */}
+      {/* 4 MAIN ACTION CARDS (2x2 GRID ON MOBILE / 4 ON DESKTOP) */}
+      {/* ---------------------------------------------------- */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-5 mb-8">
+        {/* CARD 1: TẠO PHÒNG CHƠI */}
+        <button
+          type="button"
+          onClick={() => {
+            sounds.playClick();
+            setIsSelectRoomTypeModalOpen(true);
+          }}
+          className="group relative rounded-[20px] sm:rounded-[28px] overflow-hidden shadow-xs hover:shadow-xl hover:-translate-y-1 active:translate-y-0 active:scale-[0.98] transition-all duration-200 cursor-pointer block p-0 border-0 bg-transparent text-left focus:outline-none w-full"
+          title="Tạo phòng chơi: Cô tạo phòng để cả lớp cùng chơi"
+          aria-label="Tạo phòng chơi"
+        >
+          <img
+            src="/assets/aistudio/m_card1.png"
+            alt="Tạo phòng chơi: Cô tạo phòng để cả lớp cùng chơi"
+            className="w-full h-auto block select-none pointer-events-none rounded-[20px] sm:rounded-[28px]"
+          />
+        </button>
+
+        {/* CARD 2: THAM GIA PHÒNG */}
+        <button
+          type="button"
+          onClick={() => {
+            sounds.playClick();
+            onJoinRoom();
+          }}
+          className="group relative rounded-[20px] sm:rounded-[28px] overflow-hidden shadow-xs hover:shadow-xl hover:-translate-y-1 active:translate-y-0 active:scale-[0.98] transition-all duration-200 cursor-pointer block p-0 border-0 bg-transparent text-left focus:outline-none w-full"
+          title="Tham gia phòng: Nhập mã phòng để tham gia"
+          aria-label="Tham gia phòng"
+        >
+          <img
+            src="/assets/aistudio/m_card2.png"
+            alt="Tham gia phòng: Nhập mã phòng để tham gia"
+            className="w-full h-auto block select-none pointer-events-none rounded-[20px] sm:rounded-[28px]"
+          />
+        </button>
+
+        {/* CARD 3: TẠO TRÒ CHƠI MỚI */}
+        <button
+          type="button"
+          onClick={() => {
+            sounds.playClick();
+            onCreateGame();
+          }}
+          className="group relative rounded-[20px] sm:rounded-[28px] overflow-hidden shadow-xs hover:shadow-xl hover:-translate-y-1 active:translate-y-0 active:scale-[0.98] transition-all duration-200 cursor-pointer block p-0 border-0 bg-transparent text-left focus:outline-none w-full"
+          title="Tạo trò chơi mới: Tự thiết kế trò chơi của cô"
+          aria-label="Tạo trò chơi mới"
+        >
+          <img
+            src="/assets/aistudio/m_card3.png"
+            alt="Tạo trò chơi mới: Tự thiết kế trò chơi của cô"
+            className="w-full h-auto block select-none pointer-events-none rounded-[20px] sm:rounded-[28px]"
+          />
+        </button>
+
+        {/* CARD 4: LỊCH SỬ CHƠI */}
+        <button
+          type="button"
+          onClick={() => {
+            sounds.playClick();
+            onViewHistory();
+          }}
+          className="group relative rounded-[20px] sm:rounded-[28px] overflow-hidden shadow-xs hover:shadow-xl hover:-translate-y-1 active:translate-y-0 active:scale-[0.98] transition-all duration-200 cursor-pointer block p-0 border-0 bg-transparent text-left focus:outline-none w-full"
+          title="Lịch sử chơi: Xem lại các lần chơi"
+          aria-label="Lịch sử chơi"
+        >
+          <img
+            src="/assets/aistudio/m_card4.png"
+            alt="Lịch sử chơi: Xem lại các lần chơi"
+            className="w-full h-auto block select-none pointer-events-none rounded-[20px] sm:rounded-[28px]"
+          />
+        </button>
+      </div>
+
+      {/* ---------------------------------------------------- */}
+      {/* FEATURED & FAVORITE GAMES SHOWCASE SECTION           */}
+      {/* ---------------------------------------------------- */}
+      <section className="mt-8 sm:mt-10 mb-10">
+        {/* Section Header */}
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-5 sm:mb-6">
+          <div>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-50 border border-rose-200 text-rose-600 font-black text-xs mb-2">
+              <Sparkles className="w-3.5 h-3.5 fill-rose-500 text-rose-500" />
+              <span>Gợi ý cho cô và bé</span>
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs sm:text-sm font-black text-slate-900">
-                  Chào {currentUser.fullName}!
-                </span>
-                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100">
-                  {currentUser.role === 'admin' ? 'Quản trị viên' : currentUser.role === 'teacher_premium' ? 'VIP Premium' : 'Giáo viên Member'}
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                Xem kho câu hỏi đã tạo, lịch sử phòng thi đấu và quản lý tài khoản của cô
-              </p>
-            </div>
+            <h2 className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+              <span>Trò chơi nổi bật & Được yêu thích</span>
+              <span className="text-xl sm:text-2xl">✨</span>
+            </h2>
+            <p className="text-slate-500 text-xs sm:text-sm font-semibold mt-1">
+              Những bộ trò chơi giáo dục mầm non sinh động, trực quan giúp bé vừa học vừa chơi hào hứng
+            </p>
           </div>
 
           <button
             type="button"
             onClick={() => {
               sounds.playClick();
-              onOpenProfile();
+              onOpenGamesBank();
             }}
-            className="px-4 py-2 rounded-2xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-extrabold text-xs flex items-center gap-1.5 border border-indigo-200 transition active:scale-95 cursor-pointer"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white hover:bg-sky-50 text-sky-700 font-extrabold text-xs sm:text-sm border-2 border-sky-100 hover:border-sky-300 shadow-xs hover:shadow-md transition-all self-start sm:self-auto cursor-pointer group"
           >
-            <User className="w-3.5 h-3.5" />
-            <span>Vào trang cá nhân</span>
-            <ArrowRight className="w-3.5 h-3.5" />
+            <span>Xem tất cả kho trò chơi</span>
+            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform text-sky-600" />
           </button>
         </div>
-      )}
 
-      {/* ---------------------------------------------------- */}
-      {/* 4 MAIN ACTION CARDS (2x2 GRID) AS IN ORIGINAL MOCKUP */}
-      {/* ---------------------------------------------------- */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 mb-8">
-        {/* CARD 1: TẠO PHÒNG CHƠI (Yellow pastel) */}
-        <div
-          onClick={() => {
-            sounds.playClick();
-            setIsSelectRoomTypeModalOpen(true);
-          }}
-          className="group relative bg-[#fefce8] hover:bg-[#fef9c3] border-2 border-[#fef08a] rounded-[28px] sm:rounded-[36px] p-5 sm:p-7 shadow-xs hover:shadow-md transition-all duration-200 cursor-pointer flex items-center justify-between gap-4"
-        >
-          <div className="flex items-center gap-4 sm:gap-5">
-            {/* 3D-styled preschool house icon with plus badge */}
-            <div className="w-18 h-18 sm:w-20 sm:h-20 rounded-2xl sm:rounded-3xl bg-white shadow-sm flex items-center justify-center shrink-0 border border-amber-100 group-hover:scale-105 transition-transform duration-200">
-              <svg viewBox="0 0 100 100" className="w-14 h-14 sm:w-16 sm:h-16">
-                {/* Green bush ground */}
-                <ellipse cx="25" cy="85" rx="14" ry="7" fill="#86efac" />
-                <ellipse cx="75" cy="85" rx="14" ry="7" fill="#86efac" />
-                {/* House Base */}
-                <rect x="25" y="44" width="50" height="42" rx="6" fill="#fef08a" />
-                <rect x="25" y="44" width="50" height="8" fill="#fde047" />
-                {/* Red Roof with 3D slope */}
-                <polygon points="50,15 15,44 85,44" fill="#ef4444" />
-                <polygon points="50,15 48,15 13,44 15,44" fill="#b91c1c" />
-                {/* Blue door with white medical/educational cross/plus */}
-                <rect x="38" y="58" width="24" height="28" rx="4" fill="#38bdf8" />
-                {/* Plus symbol */}
-                <rect x="47" y="66" width="6" height="14" rx="2" fill="#ffffff" />
-                <rect x="43" y="70" width="14" height="6" rx="2" fill="#ffffff" />
-                {/* Small round attic window */}
-                <circle cx="50" cy="32" r="6" fill="#fef9c3" stroke="#b91c1c" strokeWidth="2" />
-              </svg>
-            </div>
+        {/* Category & Filter Tabs */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 mb-6 scrollbar-none">
+          <button
+            type="button"
+            onClick={() => {
+              sounds.playClick();
+              setActiveFilterTab('all');
+            }}
+            className={`px-3.5 py-2 rounded-2xl font-black text-xs sm:text-sm whitespace-nowrap transition-all flex items-center gap-2 cursor-pointer shadow-xs ${
+              activeFilterTab === 'all'
+                ? 'bg-rose-500 text-white shadow-rose-300 ring-2 ring-rose-200'
+                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200 hover:text-slate-900'
+            }`}
+          >
+            <Sparkles className={`w-3.5 h-3.5 ${activeFilterTab === 'all' ? 'fill-current' : ''}`} />
+            <span>Tất cả gợi ý</span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                activeFilterTab === 'all' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+              }`}
+            >
+              {visibleGamesList.length}
+            </span>
+          </button>
 
-            <div>
-              <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-snug">
-                Tạo phòng chơi
-              </h2>
-              <p className="text-xs sm:text-sm font-bold text-slate-500 mt-0.5">
-                Cô tạo phòng để cả lớp cùng chơi
-              </p>
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={() => {
+              sounds.playClick();
+              setActiveFilterTab('favorite');
+            }}
+            className={`px-3.5 py-2 rounded-2xl font-black text-xs sm:text-sm whitespace-nowrap transition-all flex items-center gap-2 cursor-pointer shadow-xs ${
+              activeFilterTab === 'favorite'
+                ? 'bg-rose-500 text-white shadow-rose-300 ring-2 ring-rose-200'
+                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200 hover:text-slate-900'
+            }`}
+          >
+            <Heart className={`w-3.5 h-3.5 ${activeFilterTab === 'favorite' ? 'fill-current text-white' : 'text-rose-500'}`} />
+            <span>Yêu thích</span>
+            {favoriteGames.length > 0 && (
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                  activeFilterTab === 'favorite' ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-700'
+                }`}
+              >
+                {favoriteGames.length}
+              </span>
+            )}
+          </button>
 
-          {/* Yellow circular arrow button */}
-          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-amber-400 group-hover:bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-sm group-hover:translate-x-1 transition-all duration-200">
-            <ArrowRight className="w-5 h-5 sm:w-6 sm:h-6 stroke-[3]" />
-          </div>
+          <button
+            type="button"
+            onClick={() => {
+              sounds.playClick();
+              setActiveFilterTab('letters');
+            }}
+            className={`px-3.5 py-2 rounded-2xl font-black text-xs sm:text-sm whitespace-nowrap transition-all flex items-center gap-2 cursor-pointer shadow-xs ${
+              activeFilterTab === 'letters'
+                ? 'bg-rose-500 text-white shadow-rose-300 ring-2 ring-rose-200'
+                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200 hover:text-slate-900'
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>Chữ cái</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              sounds.playClick();
+              setActiveFilterTab('math');
+            }}
+            className={`px-3.5 py-2 rounded-2xl font-black text-xs sm:text-sm whitespace-nowrap transition-all flex items-center gap-2 cursor-pointer shadow-xs ${
+              activeFilterTab === 'math'
+                ? 'bg-rose-500 text-white shadow-rose-300 ring-2 ring-rose-200'
+                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200 hover:text-slate-900'
+            }`}
+          >
+            <Gamepad2 className="w-3.5 h-3.5" />
+            <span>Làm quen với toán</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              sounds.playClick();
+              setActiveFilterTab('explore');
+            }}
+            className={`px-3.5 py-2 rounded-2xl font-black text-xs sm:text-sm whitespace-nowrap transition-all flex items-center gap-2 cursor-pointer shadow-xs ${
+              activeFilterTab === 'explore'
+                ? 'bg-rose-500 text-white shadow-rose-300 ring-2 ring-rose-200'
+                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200 hover:text-slate-900'
+            }`}
+          >
+            <Compass className="w-3.5 h-3.5" />
+            <span>Khám phá xung quanh</span>
+          </button>
         </div>
 
-        {/* CARD 2: THAM GIA PHÒNG (Mint/Cyan pastel) */}
-        <div
-          onClick={() => {
-            sounds.playClick();
-            onJoinRoom();
-          }}
-          className="group relative bg-[#ecfdf5] hover:bg-[#d1fae5] border-2 border-[#a7f3d0] rounded-[28px] sm:rounded-[36px] p-5 sm:p-7 shadow-xs hover:shadow-md transition-all duration-200 cursor-pointer flex items-center justify-between gap-4"
-        >
-          <div className="flex items-center gap-4 sm:gap-5">
-            {/* 3D-styled kid avatars (blue & pink) with cheerful rays */}
-            <div className="w-18 h-18 sm:w-20 sm:h-20 rounded-2xl sm:rounded-3xl bg-white shadow-sm flex items-center justify-center shrink-0 border border-emerald-100 group-hover:scale-105 transition-transform duration-200">
-              <svg viewBox="0 0 100 100" className="w-14 h-14 sm:w-16 sm:h-16">
-                {/* Cheerful celebration rays above heads */}
-                <line x1="50" y1="20" x2="50" y2="12" stroke="#f59e0b" strokeWidth="3" strokeLinecap="round" />
-                <line x1="38" y1="24" x2="33" y2="18" stroke="#f59e0b" strokeWidth="3" strokeLinecap="round" />
-                <line x1="62" y1="24" x2="67" y2="18" stroke="#f59e0b" strokeWidth="3" strokeLinecap="round" />
+        {/* Games Showcase Grid */}
+        {displayedShowcaseGames.length > 0 ? (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
+              {paginatedGames.map((game) => {
+                const isFav = favoriteIds.includes(game.id);
+                const isPinnedBanner = game.id === featuredId;
+                const isPinnedHomepage = adminHomepageIds.includes(game.id);
 
-                {/* Left: Blue boy silhouette with cute head & body */}
-                <circle cx="36" cy="45" r="16" fill="#38bdf8" />
-                <path d="M 18 85 C 18 68 54 68 54 85 Z" fill="#0284c7" />
+                return (
+                  <div
+                    key={game.id}
+                    className="group bg-white rounded-3xl border-2 border-slate-100 hover:border-pink-300 shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col overflow-hidden hover:-translate-y-1"
+                  >
+                    {/* Card Cover Illustration */}
+                    <div className="relative aspect-video w-full bg-slate-100 overflow-hidden">
+                      <GameCoverIllustration
+                        game={game}
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      />
 
-                {/* Right: Pink girl silhouette overlapping */}
-                <circle cx="64" cy="48" r="15" fill="#f472b6" />
-                <path d="M 48 85 C 48 70 80 70 80 85 Z" fill="#db2777" />
-              </svg>
+                      {/* Gradient overlay for readability */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/40 via-transparent to-black/20 pointer-events-none" />
+
+                      {/* Category Badge top-left */}
+                      <div className="absolute top-2.5 left-2.5 z-10 flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-sky-900 bg-white/95 backdrop-blur-xs px-2.5 py-1 rounded-full shadow-xs border border-white/60">
+                          {game.category || 'Mầm non'}
+                        </span>
+                        {isPinnedHomepage && !isPinnedBanner && (
+                          <span
+                            className="text-[10px] font-black uppercase tracking-wider text-rose-700 bg-rose-50/95 backdrop-blur-xs px-2 py-0.5 rounded-full shadow-xs border border-rose-200 flex items-center gap-1"
+                            title="Trò chơi được Quản trị viên chọn hiển thị trang chủ"
+                          >
+                            <Sparkles className="w-2.5 h-2.5 fill-rose-500 text-rose-500" />
+                            <span>Gợi ý nổi bật</span>
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Actions top-right: Heart + Star */}
+                      <div className="absolute top-2.5 right-2.5 z-10 flex items-center gap-1.5">
+                        {isPinnedBanner && (
+                          <span
+                            className="px-2 py-0.5 rounded-full bg-amber-400 text-amber-950 font-black text-[10px] flex items-center gap-1 shadow-xs border border-amber-300"
+                            title="Trò chơi này đang ghim trên banner chính"
+                          >
+                            <Star className="w-3 h-3 fill-amber-950" />
+                            <span>Banner</span>
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(e) => handleToggleFavorite(game, e)}
+                          className={`p-1.5 rounded-full backdrop-blur-xs transition cursor-pointer shadow-xs active:scale-90 ${
+                            isFav
+                              ? 'bg-white text-rose-500 ring-2 ring-rose-300'
+                              : 'bg-white/85 hover:bg-white text-slate-400 hover:text-rose-500'
+                          }`}
+                          title={isFav ? 'Bỏ thích' : 'Thêm vào yêu thích'}
+                        >
+                          <Heart className={`w-3.5 h-3.5 ${isFav ? 'fill-rose-500 text-rose-500' : ''}`} />
+                        </button>
+                      </div>
+
+                      {/* Info badges bottom */}
+                      <div className="absolute bottom-2.5 left-2.5 right-2.5 z-10 flex items-center justify-between text-[10px] font-black text-white">
+                        <span className="bg-slate-900/75 backdrop-blur-xs px-2.5 py-0.5 rounded-full border border-white/20 flex items-center gap-1 shadow-xs">
+                          <BookOpen className="w-3 h-3 text-indigo-300" />
+                          <span>{game.questions?.length || 0} câu hỏi</span>
+                        </span>
+                        <span className="bg-slate-900/75 backdrop-blur-xs px-2.5 py-0.5 rounded-full border border-white/20 shadow-xs">
+                          {game.targetAge || '5 - 6 tuổi'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Card Content */}
+                    <div className="p-4 flex-1 flex flex-col justify-between">
+                      <div>
+                        <h3
+                          className="text-base font-black text-slate-900 group-hover:text-pink-600 transition-colors leading-snug line-clamp-1 cursor-pointer"
+                          onClick={() => {
+                            sounds.playCorrect();
+                            onQuickPlay(game);
+                          }}
+                          title={game.title}
+                        >
+                          {game.title}
+                        </h3>
+                        <p className="text-xs font-semibold text-slate-500 mt-1 line-clamp-2 leading-relaxed">
+                          {game.description || 'Trò chơi tương tác mầm non trực quan, giúp các bé làm quen bài học hào hứng.'}
+                        </p>
+                      </div>
+
+                      {/* Card Actions Bottom */}
+                      <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            sounds.playCorrect();
+                            onQuickPlay(game);
+                          }}
+                          className="flex-1 py-2.5 px-3 rounded-2xl bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 active:scale-[0.98] text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-pink-500/25 transition cursor-pointer"
+                          title={`Chơi ngay trò chơi ${game.title}`}
+                        >
+                          <Play className="w-3.5 h-3.5 fill-white" />
+                          <span>CHƠI NGAY</span>
+                        </button>
+
+                        {/* Quick Pin to Banner button */}
+                        {!isPinnedBanner && (
+                          <button
+                            type="button"
+                            onClick={(e) => handlePinToBanner(game, e)}
+                            className="p-2.5 rounded-2xl bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 transition cursor-pointer active:scale-95"
+                            title="Ghim trò chơi này lên banner trang chủ"
+                          >
+                            <Star className="w-4 h-4 text-amber-500" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
-            <div>
-              <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-snug">
-                Tham gia phòng
-              </h2>
-              <p className="text-xs sm:text-sm font-bold text-slate-500 mt-0.5">
-                Nhập mã phòng để tham gia
-              </p>
-            </div>
-          </div>
+            {/* Pagination Controls when games exceed 8 per page */}
+            {totalPages > 1 && (
+              <div className="mt-6 pt-5 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="text-xs font-bold text-slate-500">
+                  Hiển thị <span className="text-slate-800 font-black">{(currentPage - 1) * GAMES_PER_PAGE + 1} - {Math.min(displayedShowcaseGames.length, currentPage * GAMES_PER_PAGE)}</span> trên tổng số <span className="text-slate-800 font-black">{displayedShowcaseGames.length}</span> trò chơi
+                </div>
 
-          {/* Mint/Teal circular arrow button */}
-          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-emerald-400 group-hover:bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-sm group-hover:translate-x-1 transition-all duration-200">
-            <ArrowRight className="w-5 h-5 sm:w-6 sm:h-6 stroke-[3]" />
-          </div>
-        </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={currentPage === 1}
+                    onClick={() => {
+                      sounds.playClick();
+                      setCurrentPage((prev) => Math.max(1, prev - 1));
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1 transition ${
+                      currentPage === 1
+                        ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
+                        : 'bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-600 border border-slate-200 shadow-2xs cursor-pointer'
+                    }`}
+                    title="Trang trước"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    <span className="hidden sm:inline">Trước</span>
+                  </button>
 
-        {/* CARD 3: TẠO TRÒ CHƠI MỚI (Lilac pastel) */}
-        <div
-          onClick={() => {
-            sounds.playClick();
-            onCreateGame();
-          }}
-          className="group relative bg-[#f5f3ff] hover:bg-[#ede9fe] border-2 border-[#ddd6fe] rounded-[28px] sm:rounded-[36px] p-5 sm:p-7 shadow-xs hover:shadow-md transition-all duration-200 cursor-pointer flex items-center justify-between gap-4"
-        >
-          <div className="flex items-center gap-4 sm:gap-5">
-            {/* 3D-styled Magic Wand with Smiling Star */}
-            <div className="w-18 h-18 sm:w-20 sm:h-20 rounded-2xl sm:rounded-3xl bg-white shadow-sm flex items-center justify-center shrink-0 border border-purple-100 group-hover:scale-105 transition-transform duration-200">
-              <svg viewBox="0 0 100 100" className="w-14 h-14 sm:w-16 sm:h-16">
-                {/* Magic sparkles */}
-                <circle cx="28" cy="30" r="2.5" fill="#c084fc" />
-                <circle cx="75" cy="22" r="3" fill="#facc15" />
-                <circle cx="82" cy="55" r="2" fill="#ec4899" />
-                <circle cx="22" cy="70" r="2" fill="#38bdf8" />
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
+                    <button
+                      key={pageNum}
+                      type="button"
+                      onClick={() => {
+                        sounds.playClick();
+                        setCurrentPage(pageNum);
+                      }}
+                      className={`w-8 h-8 rounded-xl text-xs font-black transition cursor-pointer flex items-center justify-center ${
+                        pageNum === currentPage
+                          ? 'bg-rose-500 text-white shadow-md shadow-rose-200'
+                          : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  ))}
 
-                {/* Wand Stick */}
-                <path d="M 22 80 L 52 48" stroke="#7c3aed" strokeWidth="8" strokeLinecap="round" />
-                <path d="M 22 80 L 32 68" stroke="#a855f7" strokeWidth="8" strokeLinecap="round" />
-
-                {/* Smiling Star on tip */}
-                <polygon
-                  points="58,15 64,30 80,32 68,44 72,60 58,50 44,60 48,44 36,32 52,30"
-                  fill="#facc15"
-                />
-                <polygon
-                  points="58,18 63,31 77,33 66,43 70,57 58,48 46,57 50,43 39,33 53,31"
-                  fill="#fde047"
-                />
-                {/* Cute star smiling face */}
-                <circle cx="54" cy="37" r="1.5" fill="#1e293b" />
-                <circle cx="62" cy="37" r="1.5" fill="#1e293b" />
-                <path d="M 55 42 Q 58 45 61 42" stroke="#1e293b" strokeWidth="1.2" strokeLinecap="round" fill="none" />
-                <circle cx="51" cy="40" r="1.5" fill="#f43f5e" opacity="0.6" />
-                <circle cx="65" cy="40" r="1.5" fill="#f43f5e" opacity="0.6" />
-              </svg>
-            </div>
-
-            <div>
-              <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-snug">
-                Tạo trò chơi mới
-              </h2>
-              <p className="text-xs sm:text-sm font-bold text-slate-500 mt-0.5">
-                Tự thiết kế trò chơi của cô
-              </p>
-            </div>
-          </div>
-
-          {/* Purple circular arrow button */}
-          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-purple-400 group-hover:bg-purple-500 text-white flex items-center justify-center shrink-0 shadow-sm group-hover:translate-x-1 transition-all duration-200">
-            <ArrowRight className="w-5 h-5 sm:w-6 sm:h-6 stroke-[3]" />
-          </div>
-        </div>
-
-        {/* CARD 4: LỊCH SỬ CHƠI (Rose pastel) */}
-        <div
-          onClick={() => {
-            sounds.playClick();
-            onViewHistory();
-          }}
-          className="group relative bg-[#fff1f2] hover:bg-[#ffe4e6] border-2 border-[#fecdd3] rounded-[28px] sm:rounded-[36px] p-5 sm:p-7 shadow-xs hover:shadow-md transition-all duration-200 cursor-pointer flex items-center justify-between gap-4"
-        >
-          <div className="flex items-center gap-4 sm:gap-5">
-            {/* 3D-styled Friendly Blue Clock */}
-            <div className="w-18 h-18 sm:w-20 sm:h-20 rounded-2xl sm:rounded-3xl bg-white shadow-sm flex items-center justify-center shrink-0 border border-rose-100 group-hover:scale-105 transition-transform duration-200">
-              <svg viewBox="0 0 100 100" className="w-14 h-14 sm:w-16 sm:h-16">
-                <circle cx="50" cy="50" r="34" fill="#38bdf8" />
-                <circle cx="50" cy="50" r="30" fill="#0284c7" />
-                <circle cx="50" cy="50" r="26" fill="#ffffff" />
-
-                <circle cx="50" cy="29" r="2" fill="#94a3b8" />
-                <circle cx="71" cy="50" r="2" fill="#94a3b8" />
-                <circle cx="50" cy="71" r="2" fill="#94a3b8" />
-                <circle cx="29" cy="50" r="2" fill="#94a3b8" />
-
-                <line x1="50" y1="50" x2="50" y2="34" stroke="#f59e0b" strokeWidth="4" strokeLinecap="round" />
-                <line x1="50" y1="50" x2="66" y2="50" stroke="#f59e0b" strokeWidth="3.5" strokeLinecap="round" />
-                <circle cx="50" cy="50" r="4" fill="#d97706" />
-              </svg>
-            </div>
-
-            <div>
-              <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-snug">
-                Lịch sử chơi
-              </h2>
-              <p className="text-xs sm:text-sm font-bold text-slate-500 mt-0.5">
-                Xem lại các lần chơi
-              </p>
-            </div>
-          </div>
-
-          {/* Rose/Coral circular arrow button */}
-          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-rose-300 group-hover:bg-rose-400 text-white flex items-center justify-center shrink-0 shadow-sm group-hover:translate-x-1 transition-all duration-200">
-            <ArrowRight className="w-5 h-5 sm:w-6 sm:h-6 stroke-[3]" />
-          </div>
-        </div>
-      </div>
-
-      {/* ---------------------------------------------------- */}
-      {/* FOOTER: VÌ SAO GIÁO VIÊN VÀ BÉ YÊU THÍCH              */}
-      {/* ---------------------------------------------------- */}
-      <div className="bg-white rounded-[32px] sm:rounded-[36px] p-6 sm:p-10 md:p-12 border border-slate-200/80 shadow-xs mb-8">
-        <h2 className="text-center text-lg sm:text-xl md:text-2xl font-black text-slate-900 tracking-tight uppercase mb-8 sm:mb-12">
-          VÌ SAO GIÁO VIÊN VÀ BÉ YÊU THÍCH "VUI HỌC CÙNG CÔ"?
-        </h2>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 sm:gap-10 lg:gap-12 text-center">
-          {/* Feature 1: Đồng bộ tức thời */}
-          <div className="flex flex-col items-center px-2">
-            <div className="w-12 h-12 flex items-center justify-center mb-3">
-              <svg viewBox="0 0 24 24" className="w-8 h-8 drop-shadow-xs" fill="none">
-                <path
-                  d="M13 2L4 13.5H11L9.5 22L19.5 10.5H12.5L14 2H13Z"
-                  fill="#f97316"
-                />
-              </svg>
-            </div>
-            <h3 className="text-base sm:text-lg font-black text-slate-900 mb-2">
-              Đồng bộ tức thời
-            </h3>
-            <p className="text-xs sm:text-sm font-semibold text-slate-600 leading-relaxed max-w-xs">
-              Cô bấm là tất cả điện thoại các đội cùng nhận câu hỏi ngay lập tức mà không có độ trễ.
-            </p>
-          </div>
-
-          {/* Feature 2: Chống nhìn bài và gian lận */}
-          <div className="flex flex-col items-center px-2">
-            <div className="w-12 h-12 flex items-center justify-center mb-3">
-              <svg viewBox="0 0 24 24" className="w-8 h-8 drop-shadow-xs" fill="none">
-                <path
-                  d="M12 2L4 5.5V11.5C4 16.5 7.4 21.1 12 22.3C16.6 21.1 20 16.5 20 11.5V5.5L12 2Z"
-                  fill="#38bdf8"
-                  stroke="#0284c7"
-                  strokeWidth="1"
-                />
-                <path
-                  d="M12 3.5V20.8C15.6 19.7 18.5 15.8 18.5 11.5V6.6L12 3.5Z"
-                  fill="#0284c7"
-                  opacity="0.25"
-                />
-              </svg>
-            </div>
-            <h3 className="text-base sm:text-lg font-black text-slate-900 mb-2">
-              Chống nhìn bài và gian lận
-            </h3>
-            <p className="text-xs sm:text-sm font-semibold text-slate-600 leading-relaxed max-w-xs">
-              Trong lúc đếm ngược, máy tính cô chỉ hiện trạng thái đã trả lời, không lộ phương án của đội.
-            </p>
-          </div>
-
-          {/* Feature 3: Báo cáo chi tiết sau buổi học */}
-          <div className="flex flex-col items-center px-2">
-            <div className="w-12 h-12 flex items-center justify-center mb-3">
-              <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200/90 flex items-end justify-center gap-1.5 p-1.5 shadow-2xs">
-                <span className="w-1.5 h-3.5 bg-rose-400 rounded-xs" />
-                <span className="w-1.5 h-5 bg-emerald-400 rounded-xs" />
-                <span className="w-1.5 h-6.5 bg-sky-400 rounded-xs" />
+                  <button
+                    type="button"
+                    disabled={currentPage === totalPages}
+                    onClick={() => {
+                      sounds.playClick();
+                      setCurrentPage((prev) => Math.min(totalPages, prev + 1));
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1 transition ${
+                      currentPage === totalPages
+                        ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
+                        : 'bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-600 border border-slate-200 shadow-2xs cursor-pointer'
+                    }`}
+                    title="Trang sau"
+                  >
+                    <span className="hidden sm:inline">Sau</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-            </div>
-            <h3 className="text-base sm:text-lg font-black text-slate-900 mb-2">
-              Báo cáo chi tiết sau buổi học
-            </h3>
-            <p className="text-xs sm:text-sm font-semibold text-slate-600 leading-relaxed max-w-xs">
-              Ma trận đầy đủ từng câu của từng đội, tỷ lệ đúng, và hỗ trợ xuất file CSV để lưu hồ sơ.
-            </p>
+            )}
           </div>
-        </div>
-      </div>
+        ) : (
+          /* Empty State */
+          <div className="bg-white rounded-3xl p-8 sm:p-12 text-center border-2 border-dashed border-slate-200 max-w-md mx-auto shadow-xs">
+            <div className="w-16 h-16 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center mx-auto mb-3.5 text-2xl shadow-inner">
+              {activeFilterTab === 'favorite' ? '❤️' : '🔍'}
+            </div>
+            <h3 className="font-black text-lg text-slate-800">
+              {activeFilterTab === 'favorite'
+                ? 'Chưa có trò chơi yêu thích nào'
+                : 'Không tìm thấy trò chơi phù hợp'}
+            </h3>
+            <p className="text-xs sm:text-sm font-semibold text-slate-500 mt-1.5 leading-relaxed">
+              {activeFilterTab === 'favorite'
+                ? 'Hãy bấm vào biểu tượng trái tim ❤️ ở bất kỳ trò chơi nào để lưu lại danh sách yêu thích của cô và bé nhé!'
+                : 'Cô hãy thử chuyển sang chủ đề khác hoặc vào Kho trò chơi để xem đầy đủ nhé.'}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                sounds.playClick();
+                setActiveFilterTab('all');
+              }}
+              className="mt-4 px-5 py-2.5 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white font-black text-xs shadow-md shadow-rose-200 transition cursor-pointer"
+            >
+              Xem tất cả gợi ý
+            </button>
+          </div>
+        )}
+      </section>
 
       {/* Floating Toast Feedback */}
       {toastFeedback && (

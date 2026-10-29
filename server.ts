@@ -1666,21 +1666,37 @@ wss.on('connection', (ws: WebSocket) => {
             question.allowMultipleCorrect ||
             (question.options && question.options.filter(o => o.isCorrect).length > 1)
           );
-          const isWordDragQuestion = question.type === 'word_drag_drop' || msg.chosenLetter !== undefined;
-          const isUpdatableQuestion = (isMultipleChoiceQuestion || isWordDragQuestion) && session.questionStatus === 'active';
+          const isUpdatableQuestion = session.questionStatus === 'active';
 
-          // Anti-duplicate check for final submission (allow replacing auto-submitted placeholder, open-ended grace update, or updating multiple-choice/word-drag selection while question is active)
-          if (existingAns && !isOverwritingAutoSubmit && !isOpenEndedGrace && !isUpdatableQuestion) {
-            sendToSocket(ws, {
-              type: 'answer_rejected',
-              data: { reason: 'Đội của bé đã gửi kết quả rồi!' },
-            });
-            return;
+          // Anti-duplicate check: if submitting the exact same choice that was already recorded, ignore gracefully
+          const currentAnswerRaw = answerId || (Array.isArray(answerIds) ? answerIds.join(',') : '');
+          if (existingAns && !isOverwritingAutoSubmit && !isOpenEndedGrace) {
+            if (currentAnswerRaw && existingAns.answerId === currentAnswerRaw) {
+              sendToSocket(ws, {
+                type: 'answer_received',
+                data: {
+                  questionIndex: qIdx,
+                  answerId: existingAns.answerId,
+                  message: 'Đã ghi nhận lựa chọn',
+                  isCorrect: existingAns.isCorrect,
+                  pointsAwarded: existingAns.pointsAwarded,
+                },
+              });
+              return;
+            }
+
+            if (!isUpdatableQuestion) {
+              sendToSocket(ws, {
+                type: 'answer_rejected',
+                data: { reason: 'Đội của bé đã gửi kết quả rồi!' },
+              });
+              return;
+            }
           }
 
-          // If replacing auto-submitted placeholder or updating previous answer, refund previous points before calculating
-          if ((isOverwritingAutoSubmit || isOpenEndedGrace || isUpdatableQuestion) && session.teams[teamId] && existingAns) {
-            session.teams[teamId].score = Math.max(0, session.teams[teamId].score - (existingAns.pointsAwarded || 0));
+          // Unconditionally refund any previously awarded points from existingAns to eliminate duplicate scoring
+          if (existingAns && existingAns.pointsAwarded && session.teams[teamId]) {
+            session.teams[teamId].score = Math.max(0, session.teams[teamId].score - existingAns.pointsAwarded);
           }
 
           const submittedAt = Date.now();
@@ -2555,9 +2571,35 @@ function writeTrashGames(games: any[]) {
   fs.writeFileSync(TRASH_GAMES_FILE, JSON.stringify(games, null, 2), 'utf-8');
 }
 
-app.get('/api/games/custom', (_req: Request, res: Response) => {
+app.get('/api/games/custom', (req: Request, res: Response) => {
   try {
-    const games = readCustomGames().filter((g) => !g.deletedAt);
+    const userEmail = (req.query.userEmail as string || '').trim().toLowerCase();
+    const userId = (req.query.userId as string || '').trim();
+    const isAdmin = req.query.isAdmin === 'true' || userEmail === 'tranthangit2025@gmail.com';
+
+    let games = readCustomGames().filter((g) => !g.deletedAt);
+
+    if (isAdmin) {
+      return res.json(games);
+    }
+
+    // Secure privacy filtering: Exclude private and pending games from unauthenticated users or non-authors
+    games = games.filter(g => {
+      // If public or system default, anyone can see
+      if (g.visibility === 'public' || g.isSystemDefault) {
+        return true;
+      }
+      // If author is logged in, author can see their own games
+      if (userEmail && g.authorEmail && g.authorEmail.toLowerCase() === userEmail) {
+        return true;
+      }
+      if (userId && g.authorId && g.authorId === userId) {
+        return true;
+      }
+      // Otherwise strictly hide
+      return false;
+    });
+
     return res.json(games);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
