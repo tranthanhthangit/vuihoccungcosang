@@ -17,6 +17,7 @@ import {
   GraduationCap,
   PlusCircle,
   Hash,
+  QrCode,
 } from 'lucide-react';
 import { SoundToggle } from './SoundToggle';
 import { sounds } from '../../utils/sound';
@@ -35,6 +36,7 @@ interface HeaderProps {
   onCreateDefaultRoom?: () => void;
   onCreateDualRoom?: () => void;
   onJoinRoom?: () => void;
+  onOpenQRQuiz?: () => void;
   onOpenAdminPortal?: () => void;
   onOpenProfile?: (tab?: 'games' | 'history' | 'info' | 'password') => void;
   rightAction?: React.ReactNode;
@@ -48,6 +50,7 @@ export const Header: React.FC<HeaderProps> = ({
   onCreateDefaultRoom,
   onCreateDualRoom,
   onJoinRoom,
+  onOpenQRQuiz,
   onOpenAdminPortal,
   onOpenProfile,
   rightAction,
@@ -292,6 +295,29 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Users className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-emerald-600 shrink-0" />
               <span className="whitespace-nowrap">Tham gia phòng</span>
+            </button>
+          )}
+
+          {/* 4. Bảng đáp án QR xoay 4 hướng */}
+          {onOpenQRQuiz && (
+            <button
+              type="button"
+              onClick={() => {
+                sounds.playClick();
+                onOpenQRQuiz();
+              }}
+              className={`flex items-center justify-center px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-full font-black text-xs sm:text-sm transition cursor-pointer gap-1.5 shrink-0 ${
+                currentView === 'qr_quiz' || currentView === 'qr_host' || currentView === 'qr_scanner'
+                  ? 'bg-amber-400 text-slate-950 shadow-xs ring-1 ring-amber-500 font-black'
+                  : 'text-slate-700 hover:text-amber-700 hover:bg-amber-50'
+              }`}
+              title="Module Bảng Đáp Án QR xoay 4 hướng"
+            >
+              <QrCode className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-amber-600 shrink-0" />
+              <span className="whitespace-nowrap">Bảng QR xoay</span>
+              <span className="text-[9px] font-black uppercase px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 hidden md:inline">
+                Mới
+              </span>
             </button>
           )}
 

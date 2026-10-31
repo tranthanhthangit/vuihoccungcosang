@@ -1,129 +1,131 @@
-# Quản lý Trò chơi Hiển thị Trang chủ dành cho Quản trị viên
+# Module Bảng Đáp Án QR Xoay 4 Hướng (Preschool QR Response Cards)
 
-Hệ thống cho phép Quản trị viên (Admin) kiểm soát tập trung toàn bộ danh sách các trò chơi xuất hiện tại Trang chủ, kết hợp thông minh với danh sách trò chơi yêu thích (thả tim) của người dùng và cơ chế phân trang tối ưu chống tràn giao diện.
+Hệ thống trắc nghiệm tương tác không dùng thiết bị cá nhân cho trẻ mầm non. Mỗi trẻ sở hữu một bảng đáp án QR cá nhân độc nhất với 4 hướng xoay tương ứng 4 lựa chọn A, B, C, D. Giáo viên sử dụng điện thoại thông minh lia camera quét đáp án của cả lớp, tự động giải mã danh tính và hướng xoay để chấm điểm tức thì trên màn hình lớn.
 
 ---
 
-### Quyết định từ Quản trị viên & Xác nhận thiết kế
+## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> Dựa trên phản hồi khảo sát trực tiếp của Quản trị viên:
-> - **Khu vực quản lý tập trung**: Chỉ quản lý trong **Bảng điều khiển Quản trị viên (Admin Dashboard)** để đảm bảo tính an toàn, bảo mật và phân quyền rõ ràng.
-> - **Quy tắc hiển thị trên Trang chủ**: **Ưu tiên trò Quản trị viên ghim** kết hợp các trò người dùng thả tim (Favorites), đảm bảo những trò chơi giáo dục hay nhất luôn được giới thiệu ở vị trí nổi bật.
-> - **Kiểm soát độ dài trang chủ**: Giới hạn hiển thị 8 trò chơi mỗi trang kèm bộ chuyển trang / "Xem thêm" nhẹ nhàng, ngăn chặn việc danh sách dài làm phá vỡ cấu trúc thẩm mỹ mầm non của trang chủ.
+> **Các quyết định kiến trúc đã thống nhất với Giáo viên qua phỏng vấn Turn 1:**
+> - **Cơ chế quét camera**: Quét video luồng liên tục (*continuous stream*). Giáo viên chỉ cần lia điện thoại qua lớp học, hệ thống tự động nhận diện từng bảng QR khi lọt vào khung hình, phát tín hiệu âm thanh nhẹ nhàng và đánh dấu học sinh đã trả lời.
+> - **Mô hình vận hành**: Hỗ trợ chuẩn **2 màn hình đồng bộ thời gian thực** (Máy tính/Laptop kết nối máy chiếu hoặc TV hiển thị câu hỏi và thống kê sinh động cho cả lớp; Điện thoại của cô giáo quét camera và bấm chốt/chuyển câu) cùng chế độ dự phòng quét trực tiếp trên 1 thiết bị duy nhất.
+> - **Ngân hàng câu hỏi**: Xây dựng phân hệ quản lý bộ câu hỏi QR chuyên biệt cho trắc nghiệm 4 đáp án A-B-C-D với hình ảnh to rõ cho trẻ mầm non, đồng thời cho phép nhập/sao chép nhanh từ Kho trò chơi hiện có của website.
 
 ---
 
-## 1. Tổng quan & Mục tiêu
+## 1. Overview & Core Concept
 
-- **Mục tiêu**: Trao quyền cho Quản trị viên chủ động tuyển chọn danh mục trò chơi mẫu và trò chơi nổi bật được khuyến nghị trên Trang chủ (`HomePage`), không để danh sách tự do kéo dài vô tận hoặc hiển thị lộn xộn.
-- **Đối tượng sử dụng**:
-  - **Quản trị viên (Admin)**: Thao tác ghim / bỏ ghim, thay đổi độ ưu tiên, xem trước số lượng trò chơi đang hiển thị ra ngoài trang chủ.
-  - **Giáo viên & Học sinh**: Khi truy cập trang chủ sẽ thấy ngay danh mục trò chơi chất lượng cao được kiểm duyệt cùng các trò mình đã thả tim, với bố cục trực quan, mượt mà và không bị ngợp.
-- **Giá trị mang lại**: Giữ cho trang chủ luôn tinh gọn, tươi sáng đúng chuẩn thẩm mỹ giáo dục mầm non, đồng thời linh hoạt thay đổi nội dung nổi bật theo từng sự kiện, chủ đề tuần/tháng.
+- **Mục tiêu**: Đem lại trải nghiệm thi đua vui nhộn, hào hứng cho trẻ mầm non mà không cần trang bị máy tính bảng hay điện thoại cho từng bé.
+- **Đối tượng sử dụng**: Giáo viên mầm non (dùng điện thoại quét và điều khiển) và Học sinh mầm non từ 3–6 tuổi (cầm bảng in xoay hướng đáp án).
+- **Quy ước 4 hướng xoay**:
+  - Hướng $\mathbf{0^\circ}$ (Cạnh A ở trên đỉnh): Chọn đáp án **A**.
+  - Hướng $\mathbf{90^\circ}$ theo chiều kim đồng hồ (Cạnh B ở trên đỉnh): Chọn đáp án **B**.
+  - Hướng $\mathbf{180^\circ}$ (Cạnh C ở trên đỉnh): Chọn đáp án **C**.
+  - Hướng $\mathbf{270^\circ}$ (Cạnh D ở trên đỉnh): Chọn đáp án **D**.
 
 ---
 
-## 2. Trải nghiệm người dùng & Thiết kế giao diện (UX/UI)
+## 2. User Experience & Visual Design
 
-### A. Luồng thao tác của Quản trị viên (Admin Dashboard)
-1. Quản trị viên vào **Bảng điều khiển Quản trị viên** -> Chọn tab mới: **"Trang chủ & Ghim nổi bật"**.
-2. Bảng quản trị hiển thị:
-   - Thẻ thống kê: *Tổng trò ghim trang chủ* (ví dụ: `6 / 8 trò tối ưu`), *Trò ghim Banner chính* (1 trò).
-   - Thanh công cụ: Tìm kiếm theo tên đề/chủ đề, lọc theo trạng thái (Đang ghim / Chưa ghim).
-   - Danh sách trò chơi dạng bảng & lưới trực quan:
-     - Nút gạt bật/tắt (Toggle Switch) hoặc nút ngôi sao: **"Ghim Trang chủ"**.
-     - Huy hiệu nhận diện trò chơi đang ghim Banner đỉnh trang.
-     - Nút xem trước nhanh nội dung bộ câu hỏi.
-3. Khi Quản trị viên bật/tắt ghim, dữ liệu được lưu tức thời và đồng bộ ngay với `HomePage`.
+### 5 Phân hệ chính trong Menu Giáo viên:
+1. **Quản lý học sinh**:
+   - Thêm/sửa/xóa học sinh, phân loại theo Lớp mầm non (Chồi, Mầm, Lá...).
+   - Tải ảnh đại diện cho bé, nhập danh sách từ Excel/CSV.
+   - Cấp phát mã định danh an toàn (`QR Token`) duy nhất cho từng bé (không chứa thông tin nhạy cảm của trẻ bên trong chuỗi QR).
+2. **In bảng đáp án QR**:
+   - Bản in chuẩn khổ A4 (2 bảng/trang) hoặc A5 (1 bảng/trang).
+   - Tương phản đen trắng tuyệt đối cho mã QR, 4 cạnh in chữ A, B, C, D siêu lớn kèm viền màu nhận biết rõ ràng cho trẻ mầm non.
+   - Có khu vực tên bé và ảnh đại diện ở góc nhỏ không che khuất mã quét.
+   - Chức năng "Quét thử nghiệm": Cô giáo có thể bật camera quét thử ngay trên màn hình hoặc giấy in để làm quen.
+3. **Ngân hàng câu hỏi QR**:
+   - Tạo bộ câu hỏi trắc nghiệm trực quan với ảnh minh họa phóng to.
+   - 4 đáp án A, B, C, D rõ ràng, hỗ trợ giọng đọc câu hỏi tiếng Việt.
+   - Quản lý theo chủ đề mầm non: Chữ cái, Toán đếm, Động vật, Thực vật, Giao thông, Kỹ năng sống.
+4. **Tổ chức phòng chơi (Host & Scanner)**:
+   - **Màn hình máy chiếu (Big Screen)**: Hiển thị câu hỏi, hình ảnh, đồng hồ đếm ngược, danh sách thẻ tên các bé chuyển màu xanh khi cô quét trúng (chưa lộ đáp án trước khi chốt), biểu đồ cột phân bố A/B/C/D và hoạt cảnh vinh danh.
+   - **Màn hình điện thoại quét (Mobile Scanner HUD)**: Khung quét camera siêu mượt với vệt quét laser sinh động, hiển thị danh sách các bé vừa quét được kèm âm thanh phản hồi 'ting', nút "Chốt đáp án" và "Câu tiếp theo" cỡ lớn dễ bấm bằng một tay.
+5. **Kết quả và Lịch sử**:
+   - Bảng tổng kết số câu đúng/sai của từng bé.
+   - Tỷ lệ đúng của cả lớp cho từng câu hỏi giúp cô đánh giá mức độ tiếp thu bài học.
+   - Lưu trữ lịch sử ván chơi vĩnh viễn vào Supabase & IndexedDB.
 
-### B. Luồng hiển thị trên Trang chủ (`HomePage`)
-1. **Banner đỉnh trang**: Vẫn giữ nguyên vị trí danh dự dành cho trò chơi tiêu biểu nhất (có thể đổi trò nhanh qua Admin).
-2. **Khu vực "Trò chơi nổi bật & Yêu thích"**:
-   - Tab bộ lọc: "Tất cả gợi ý" (mặc định), "Yêu thích của bé" (❤️), "Chữ cái", "Làm quen với toán", "Khám phá xung quanh".
-   - **Thứ tự ưu tiên hiển thị**:
-     1. Trò do Quản trị viên ghim trên Trang chủ (`Admin Homepage Games`).
-     2. Trò người dùng đã bấm thả tim (`Favorite Games`).
-     3. Các trò chơi công khai khác nếu số lượng chưa đủ giới hạn hiển thị.
-   - **Giới hạn & Phân trang**:
-     - Hiển thị tối đa **8 trò chơi / trang** (lưới 4 cột trên Desktop, 2 cột trên Tablet/Mobile).
-     - Nếu có hơn 8 trò, hiển thị thanh phân trang thiếu nhi (Trang 1, 2, 3... hoặc nút "Xem thêm trò chơi") để không bao giờ làm tràn trang chủ.
+---
+
+## 3. Key Technical Decisions & Algorithmic Design
+
+### A. Thuật toán nhận diện góc xoay 4 hướng (QR Angle Detection)
+- Thư viện: Tích hợp thư viện giải mã mã QR client-side siêu nhẹ `jsqr`.
+- `jsQR` cung cấp tọa độ 4 góc của mã QR trong khung hình video:
+  - `topLeftFinder` ($P_{TL}$), `topRightFinder` ($P_{TR}$), `bottomLeftFinder` ($P_{BL}$).
+- Vector chỉ hướng "đỉnh" của mã QR trên mặt phẳng ảnh:
+  $$\vec{u} = P_{TR} - P_{TL}$$
+  $$\vec{v} = P_{TL} - P_{BL}$$
+- Tính góc quay $\theta$ của bảng QR so với trục thẳng đứng của khung hình camera:
+  $$\theta = \text{atan2}(v_y, v_x)$$
+- Ánh xạ $\theta$ vào 4 góc phần tư ($90^\circ$ mỗi cung) có dung sai góc nghiêng $\pm 35^\circ$:
+  - Vùng A (Top): $\theta \in [-45^\circ, +45^\circ]$
+  - Vùng B (Right): $\theta \in [+45^\circ, +135^\circ]$
+  - Vùng C (Bottom): $\theta \in [+135^\circ, +180^\circ] \cup [-180^\circ, -135^\circ]$
+  - Vùng D (Left): $\theta \in [-135^\circ, -45^\circ]$
+- **Dung sai & Bộ lọc chống rung**: Sử dụng bộ đệm xác thực (Debounce/Confirmation threshold 2 khung hình liên tiếp khớp cùng đáp án) để loại trừ góc nghiêng lỡ tay khi bé giơ bảng.
+
+### B. Cơ chế kết nối 2 màn hình (TV Display $\leftrightarrow$ Mobile Scanner)
+- **Kênh chính**: WebSocket Server hiện có trên Node/Express (`/ws`) với room code chuyên dụng cho phiên quét QR.
+- **Dự phòng đám mây**: Supabase Realtime Broadcast channel khi chạy trên môi trường serverless/preview.
+- Khi camera điện thoại quét trúng học sinh, gửi gói tin `{ type: 'STUDENT_ANSWERED', studentId, answer, timestamp }`. Màn hình TV lập tức cập nhật trạng thái thẻ tên của bé mà không làm lộ đáp án A/B/C/D cho đến khi cô bấm **Chốt đáp án**.
+
+---
+
+## 4. Technical Architecture & System Diagram
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  BẢNG ĐIỀU KHIỂN QUẢN TRỊ VIÊN                                         │
-│  [Duyệt bộ đề (0)]  [Giáo viên]  [★ Quản lý Trang chủ]  [Hệ thống]    │
+│                   HỆ THỐNG BẢNG ĐÁP ÁN QR VUI HỌC CÙNG CÔ              │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+           ┌────────────────────────┴────────────────────────┐
+           ▼                                                 ▼
+┌───────────────────────────┐                     ┌───────────────────────────┐
+│     MÀN HÌNH MÁY CHIẾU    │                     │   ĐIỆN THOẠI QUÉT CỦA CÔ  │
+│      (Laptop / Big TV)    │                     │      (Mobile Scanner)     │
+├───────────────────────────┤                     ├───────────────────────────┤
+│ • Chiếu câu hỏi & hình ảnh│ ◄─── WebSocket ───► │ • Video Camera Stream     │
+│ • Danh sách học sinh lớp  │     Realtime Sync   │ • jsQR Corner Math Engine │
+│ • Biểu đồ tỷ lệ A,B,C,D   │                     │ • Rung haptic + Ting sfx  │
+│ • Hoạt cảnh tuyên dương   │                     │ • Nút Chốt & Chuyển câu   │
+└──────────┬────────────────┘                     └─────────────┬─────────────┘
+           │                                                    │
+           └────────────────────────┬───────────────────────────┘
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                        TẦNG DỮ LIỆU & LƯU TRỮ                          │
 ├────────────────────────────────────────────────────────────────────────┤
-│  ⚡ Đang ghim 6 trò ra trang chủ | Banner chính: Nhận biết chữ h, k     │
-│  🔍 Tìm kiếm trò chơi...                    [Tất cả] [Đã ghim]        │
-│                                                                        │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │ [Icon] Nhận biết chữ h, k  • 5-6 tuổi  [⭐ Banner] [✓ Ghim Home] │  │
-│  │ [Icon] Bé vui học toán 1-10 • 4-5 tuổi             [✓ Ghim Home] │  │
-│  │ [Icon] Đố vui động vật rừng • 3-4 tuổi             [+ Ghim Home] │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────────────┘
-                                 │
-                                 ▼ (Đồng bộ thời gian thực)
-┌────────────────────────────────────────────────────────────────────────┐
-│  TRANG CHỦ VUI HỌC CÙNG CÔ                                             │
-│  [ Banner chính tương tác ]                                            │
-│                                                                        │
-│  🌟 TRÒ CHƠI NỔI BẬT & ĐƯỢC YÊU THÍCH                                  │
-│  [⭐ Tất cả gợi ý] [❤️ Yêu thích (2)] [Chữ cái] [Toán]                │
-│                                                                        │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐                   │
-│  │ Trò ghim │ │ Trò ghim │ │ Trò thả  │ │ Trò thả  │ (Tối đa 8 trò)   │
-│  │ Admin 1  │ │ Admin 2  │ │ tim 1    │ │ tim 2    │                   │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘                   │
-│                                                                        │
-│         [  <  Trang 1 / 2  >  ]  hoặc  [ ✨ Xem thêm trò chơi ]        │
+│ • qr_students (Hồ sơ học sinh & QR Token)                              │
+│ • qr_questions & qr_question_packs (Ngân hàng câu hỏi trắc nghiệm)     │
+│ • qr_sessions & qr_session_history (Lịch sử câu trả lời & chấm điểm)   │
+│ • Supabase Cloud DB + IndexedDB / LocalStorage Offline-first           │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 3. Quyết định sản phẩm & Đánh đổi kỹ thuật
+## 5. Kế hoạch triển khai chi tiết theo 6 giai đoạn
 
-1. **Phương thức lưu trữ danh sách ghim trang chủ**:
-   - *Cách tiếp cận*: Mở rộng `gameStorage.ts` với key `vuihoc_admin_homepage_game_ids` được lưu trữ đồng bộ (IndexedDB + localStorage + Cloud sync API khi có kết nối backend).
-   - *Lý do*: Tương thích mượt mà với mô hình hiện tại của `vuihoc_featured_game_id`, phản hồi ngay lập tức không có độ trễ giật lag (zero latency), có thể pub/sub listener để cập nhật tức thì qua các component.
-2. **Quy tắc phân trang trên Trang chủ**:
-   - *Cách tiếp cận*: Giới hạn 8 trò/trang với thanh chuyển trang đánh số và nút Trước/Sau bo tròn màu sắc tươi sáng.
-   - *Lý do*: Giải quyết triệt để nỗi lo "kho trò chơi quá nhiều khiến giao diện bị quá dài", đảm bảo phụ huynh và các bé lướt trên máy tính bảng hoặc điện thoại không phải cuộn mỏi tay.
-3. **Phân quyền thao tác**:
-   - Chỉ hiển thị nút ghim/bỏ ghim trong `AdminDashboard` cho tài khoản Quản trị viên (`isAdmin === true` hoặc email `tranthangit2025@gmail.com`). Khách hoặc giáo viên thông thường chỉ có quyền thả tim yêu thích cá nhân.
-
----
-
-## 4. Kiến trúc kỹ thuật & Kế hoạch sửa đổi
-
-### A. Dịch vụ lưu trữ (`src/services/gameStorage.ts`)
-- Khởi tạo key `ADMIN_HOMEPAGE_GAMES_KEY = 'vuihoc_admin_homepage_game_ids'`.
-- Thêm các hàm nghiệp vụ:
-  - `getAdminHomepageGameIds(): string[]` (Mặc định khởi tạo các trò tiêu biểu nếu chưa có).
-  - `setAdminHomepageGameIds(ids: string[]): void`
-  - `toggleAdminHomepageGameId(gameId: string): boolean`
-  - `subscribeAdminHomepageGames(listener: (ids: string[]) => void): () => void`
-
-### B. Bảng điều khiển Quản trị viên (`src/components/admin/AdminDashboard.tsx`)
-- Bổ sung tab `homepage` ("Ghim Trang chủ") vào thanh điều hướng tab Admin.
-- Thiết kế giao diện quản lý ghim:
-  - Danh sách toàn bộ trò chơi hợp lệ (bao gồm cả trò hệ thống và trò của giáo viên đã được duyệt).
-  - Nút chuyển trạng thái ghim lên trang chủ (On/Off) với âm thanh thông báo vui nhộn (`sounds.playCorrect()`).
-  - Nút chọn nhanh làm "Trò chơi Banner chính".
-  - Thống kê số lượng trò đang kích hoạt hiển thị ngoài trang chủ.
-
-### C. Trang chủ (`src/pages/HomePage.tsx`)
-- Lắng nghe sự thay đổi của danh sách `adminHomepageGameIds`.
-- Thuật toán sắp xếp danh sách showcase:
-  - **Ưu tiên 1**: Trò chơi nằm trong danh sách Admin ghim trang chủ.
-  - **Ưu tiên 2**: Trò chơi nằm trong danh sách yêu thích của người dùng hiện tại (`favoriteIds`).
-  - **Ưu tiên 3**: Trò chơi công khai khác theo thứ tự ngày tạo/chủ đề.
-- Cơ chế phân trang:
-  - `showcasePage` (mặc định trang 1), `GAMES_PER_PAGE = 8`.
-  - Nút chuyển trang sinh động phong cách mầm non: số trang, nút chuyển trang trước/sau.
-
-### D. Kiểm thử & Đảm bảo chất lượng
-- Chạy `compile_applet` và `lint_applet` kiểm tra cú pháp TypeScript và Tailwind CSS.
-- Kiểm tra tính nhất quán giữa tài khoản Quản trị viên và người dùng khách.
+1. **Giai đoạn 1: Thuật toán nhận diện & Module in bảng QR chuẩn**
+   - Cài đặt thư viện `jsqr` để phân tích góc xoay camera.
+   - Xây dựng component thiết kế & in bảng QR học sinh A4/A5 với độ tương phản cao, 4 nhãn A, B, C, D rõ nét.
+   - Thử nghiệm quét camera ngay trong trình duyệt.
+2. **Giai đoạn 2: Quản lý học sinh & Lớp học**
+   - Giao diện danh sách học sinh theo lớp, thêm mới, sửa, xóa, tìm kiếm.
+   - Hỗ trợ tải ảnh đại diện bé, nhập danh sách từ CSV/Excel, in hàng loạt bảng QR theo lớp.
+3. **Giai đoạn 3: Ngân hàng câu hỏi QR trắc nghiệm**
+   - Quản lý bộ câu hỏi 4 đáp án A-B-C-D, hỗ trợ hình ảnh to, âm thanh đọc câu hỏi.
+   - Cho phép tạo bộ câu hỏi theo chủ đề mầm non và nhập từ kho trò chơi sẵn có.
+4. **Giai đoạn 4: Màn hình tổ chức trò chơi & Đồng bộ 2 thiết bị**
+   - Màn hình trình chiếu (Host TV view) và Màn hình camera điện thoại quét (Mobile Scanner view).
+   - Đồng bộ thời gian thực qua WebSocket/Realtime với mã PIN phòng quét.
+5. **Giai đoạn 5: Chấm điểm, Báo cáo & Lịch sử**
+   - Thống kê tỷ lệ đúng sai, biểu đồ phân bố đáp án, bảo toàn bản chụp câu hỏi lịch sử.
+6. **Giai đoạn 6: Tối ưu UI/UX mầm non & Kiểm thử tổng thể**
+   - Kiểm tra linter, TypeScript build và dev server đảm bảo không phát sinh lỗi.

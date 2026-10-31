@@ -368,28 +368,15 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
     onExit();
   };
 
-  // If not joined yet, show Join Screen
-  if (!joinedTeam || !session) {
-    return (
-      <PlayerJoin
-        initialRoomCode={roomCode}
-        onJoin={handleJoin}
-        onExit={handleExitToHome}
-        error={joinError}
-        isLoading={isJoining}
-      />
-    );
-  }
-
-  const currentQIndex = session.currentQuestionIndex;
+  const currentQIndex = session?.currentQuestionIndex ?? 0;
   const myAssignedSet: 'A' | 'B' = (joinedTeam && joinedTeam.assignedSet) ||
-    (joinedTeam && session.teamAssignments?.[joinedTeam.teamId]) ||
-    session.myAssignedSet ||
+    (joinedTeam && session?.teamAssignments?.[joinedTeam.teamId]) ||
+    session?.myAssignedSet ||
     'A';
 
   // In Dual Mode, determine the exact question set assigned to this team
-  let effectiveGame = session.game;
-  if (session.isDualMode) {
+  let effectiveGame = session?.game;
+  if (session?.isDualMode) {
     if (myAssignedSet === 'B') {
       if (session.gameB) {
         effectiveGame = session.gameB;
@@ -404,7 +391,35 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
       }
     }
   }
-  const currentQ = effectiveGame.questions[currentQIndex];
+  const currentQ = effectiveGame?.questions?.[currentQIndex];
+
+  // If teacher collected answers and child has a local drawing that wasn't yet acknowledged on server, push it immediately
+  // Note: Must remain at top-level before any return to uphold React Rules of Hooks!
+  useEffect(() => {
+    if (session && joinedTeam && session.questionStatus === 'results' && currentQ?.type === 'open_ended') {
+      const localDrawing = typeof window !== 'undefined'
+        ? localStorage.getItem(`vuihoc_drawing_${session.roomCode}_${joinedTeam.teamId}_${currentQIndex}`)
+        : null;
+      const remoteDrawing = session.answers?.[currentQIndex]?.[joinedTeam.teamId]?.openEnded?.drawingDataUrl;
+      if (localDrawing && localDrawing.length > 50 && (!remoteDrawing || remoteDrawing.length < 50)) {
+        handleSubmitOpenEnded('', localDrawing, currentQIndex);
+      }
+    }
+  }, [session?.questionStatus, currentQIndex, joinedTeam?.teamId, currentQ?.type]);
+
+  // If not joined yet, show Join Screen
+  if (!joinedTeam || !session || !effectiveGame) {
+    return (
+      <PlayerJoin
+        initialRoomCode={roomCode}
+        onJoin={handleJoin}
+        onExit={handleExitToHome}
+        error={joinError}
+        isLoading={isJoining}
+      />
+    );
+  }
+
   const rawAnswer: TeamAnswer | undefined = session.answers[currentQIndex]?.[joinedTeam.teamId];
 
   // Synthesize or enhance answer for open_ended question so child's drawing is never marked as "chưa làm bài"
@@ -455,19 +470,6 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
       }
     }
   }
-
-  // If teacher collected answers and child has a local drawing that wasn't yet acknowledged on server, push it immediately
-  useEffect(() => {
-    if (session?.questionStatus === 'results' && currentQ?.type === 'open_ended' && joinedTeam) {
-      const localDrawing = typeof window !== 'undefined'
-        ? localStorage.getItem(`vuihoc_drawing_${session.roomCode}_${joinedTeam.teamId}_${currentQIndex}`)
-        : null;
-      const remoteDrawing = session.answers[currentQIndex]?.[joinedTeam.teamId]?.openEnded?.drawingDataUrl;
-      if (localDrawing && localDrawing.length > 50 && (!remoteDrawing || remoteDrawing.length < 50)) {
-        handleSubmitOpenEnded('', localDrawing, currentQIndex);
-      }
-    }
-  }, [session?.questionStatus, currentQIndex, joinedTeam?.teamId, currentQ?.type]);
 
   const isNoLimitQ = true;
   const effectiveTimeLimit = 0;

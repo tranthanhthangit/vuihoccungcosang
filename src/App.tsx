@@ -21,6 +21,11 @@ import { Modal } from './components/common/Modal';
 import { realtime } from './services/realtimeClient';
 import { useAuth } from './context/AuthContext';
 import { Crown, AlertTriangle } from 'lucide-react';
+import { QRQuizModule } from './components/qrQuiz/QRQuizModule';
+import { QRHostScreen } from './components/qrQuiz/QRHostScreen';
+import { QRScannerHUD } from './components/qrQuiz/QRScannerHUD';
+import { QRStudent, QRQuestionPack, QRAnswerSubmission, QRSessionHistoryRecord } from './types/qrQuiz';
+import { getQRStudents, getQRQuestionPacks, saveQRSessionHistory } from './services/qrStorage';
 
 export type AppView =
   | 'home'
@@ -30,7 +35,10 @@ export type AppView =
   | 'player'
   | 'history'
   | 'admin_dashboard'
-  | 'member_profile';
+  | 'member_profile'
+  | 'qr_quiz'
+  | 'qr_host'
+  | 'qr_scanner';
 
 export default function App() {
   const { currentUser, isMember, quota, isAdmin } = useAuth();
@@ -52,6 +60,94 @@ export default function App() {
   const [hostSessionKey, setHostSessionKey] = useState<number>(() => Date.now());
   const [hostRoomCodeFromUrl, setHostRoomCodeFromUrl] = useState<string>('');
   const [profileInitialTab, setProfileInitialTab] = useState<'games' | 'history' | 'info' | 'password'>('games');
+
+  // QR Rotating Card Quiz States
+  const [qrSessionConfig, setQrSessionConfig] = useState<{
+    roomCode: string;
+    pack: QRQuestionPack;
+    students: QRStudent[];
+  } | null>(null);
+  const [qrRecordedAnswers, setQrRecordedAnswers] = useState<Record<string, QRAnswerSubmission>>({});
+  const [qrAccumulatedAnswers, setQrAccumulatedAnswers] = useState<
+    Array<{ qIndex: number; answers: Record<string, QRAnswerSubmission> }>
+  >([]);
+  const [qrQuestionIndex, setQrQuestionIndex] = useState<number>(0);
+  const [qrIsLocked, setQrIsLocked] = useState<boolean>(false);
+  const [qrIsRevealed, setQrIsRevealed] = useState<boolean>(false);
+  const [qrScannerRoomCode, setQrScannerRoomCode] = useState<string>('');
+
+  const handleFinishQRQuiz = () => {
+    if (!qrSessionConfig) return;
+    const allQuestionRounds = [
+      ...qrAccumulatedAnswers,
+      { qIndex: qrQuestionIndex, answers: qrRecordedAnswers },
+    ];
+
+    const studentSummaries = qrSessionConfig.students.map((s) => {
+      let correctCount = 0;
+      let totalScore = 0;
+      const answersList: any[] = [];
+
+      allQuestionRounds.forEach((round) => {
+        const q = qrSessionConfig.pack.questions[round.qIndex];
+        const ans = round.answers[s.id];
+        if (q) {
+          const isCorrect = ans ? ans.isCorrect || ans.selectedAnswer === q.correctAnswer : false;
+          if (isCorrect) {
+            correctCount++;
+            totalScore += q.points || 10;
+          }
+          answersList.push({
+            questionId: q.id,
+            questionTitle: q.prompt || q.title,
+            chosenAnswer: ans?.selectedAnswer || ans?.answer || 'A',
+            correctAnswer: q.correctAnswer,
+            isCorrect,
+          });
+        }
+      });
+
+      return {
+        studentId: s.id,
+        studentName: s.name,
+        className: s.className,
+        avatarUrl: s.avatarUrl,
+        correctCount,
+        totalCount: qrSessionConfig.pack.questions.length,
+        totalScore,
+        answersList,
+      };
+    });
+
+    studentSummaries.sort((a, b) => b.totalScore - a.totalScore);
+
+    const totalQuestions = qrSessionConfig.pack.questions.length;
+    const totalPossibleAnswers = qrSessionConfig.students.length * totalQuestions;
+    const totalCorrectAll = studentSummaries.reduce((sum, s) => sum + s.correctCount, 0);
+    const overallAccuracy =
+      totalPossibleAnswers > 0 ? Math.round((totalCorrectAll / totalPossibleAnswers) * 100) : 0;
+
+    const historyRecord: QRSessionHistoryRecord = {
+      id: `qr_hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      sessionCode: qrSessionConfig.roomCode,
+      roomCode: qrSessionConfig.roomCode,
+      title: qrSessionConfig.pack.title,
+      packTitle: qrSessionConfig.pack.title,
+      className: qrSessionConfig.students[0]?.className || 'Lớp Mầm Non',
+      date: Date.now(),
+      playedAt: Date.now(),
+      totalQuestions,
+      totalStudents: qrSessionConfig.students.length,
+      correctRate: overallAccuracy,
+      overallAccuracy,
+      teacherEmail: currentUser?.email || 'co.giaovien@vuihoc.vn',
+      teacherName: currentUser?.fullName || 'Cô Giáo Viên',
+      studentSummaries,
+    };
+
+    saveQRSessionHistory(historyRecord);
+    navigateTo('qr_quiz', '/qr-quiz');
+  };
 
   // Swipe down gesture detection for revealing header when player is in session
   useEffect(() => {
@@ -123,7 +219,15 @@ export default function App() {
         }
       }
 
-      if (pathname.includes('/host')) {
+      if (pathname.includes('/qr-scanner') || params.get('view') === 'qr_scanner') {
+        const qrRoom = (params.get('room') || '').trim().toUpperCase();
+        setQrScannerRoomCode(qrRoom);
+        setCurrentView('qr_scanner');
+      } else if (pathname.includes('/qr-host') || params.get('view') === 'qr_host') {
+        setCurrentView('qr_host');
+      } else if (pathname.includes('/qr-quiz') || params.get('view') === 'qr_quiz') {
+        setCurrentView('qr_quiz');
+      } else if (pathname.includes('/host')) {
         const hostRoom = (params.get('room') || '').trim().toUpperCase();
         setHostRoomCodeFromUrl(hostRoom);
         setCurrentView('host');
@@ -380,7 +484,10 @@ export default function App() {
       )}
 
       {/* Top Header for normal views (home, games_list, host, history, and player before joining) */}
-      {currentView !== 'builder' && !(currentView === 'player' && isPlayerInSession) && (
+      {currentView !== 'builder' &&
+        currentView !== 'qr_host' &&
+        currentView !== 'qr_scanner' &&
+        !(currentView === 'player' && isPlayerInSession) && (
         <Header
           currentView={currentView}
           title="Vui Học Cùng Cô"
@@ -424,6 +531,7 @@ export default function App() {
               navigateTo('player', '/join');
             }
           }}
+          onOpenQRQuiz={() => navigateTo('qr_quiz', '/qr-quiz')}
           onOpenAdminPortal={() => navigateTo('admin_dashboard', '/admin')}
           onOpenProfile={(tab) => {
             if (tab) setProfileInitialTab(tab);
@@ -441,6 +549,7 @@ export default function App() {
             onCreateGame={handleCreateNewGame}
             onCreateDualRoom={() => setIsDualRoomModalOpen(true)}
             onJoinRoom={() => navigateTo('player', '/join')}
+            onOpenQRQuiz={() => navigateTo('qr_quiz', '/qr-quiz')}
             onViewHistory={() => navigateTo('history', '/history')}
             onOpenProfile={() => navigateTo('member_profile', '/profile')}
           />
@@ -542,12 +651,103 @@ export default function App() {
             onCreateNewGame={handleCreateNewGame}
           />
         )}
+
+        {currentView === 'qr_quiz' && (
+          <QRQuizModule
+            onStartHostSession={(cfg) => {
+              setQrSessionConfig(cfg);
+              setQrQuestionIndex(0);
+              setQrRecordedAnswers({});
+              setQrAccumulatedAnswers([]);
+              setQrIsLocked(false);
+              setQrIsRevealed(false);
+              navigateTo('qr_host', `/qr-host?room=${cfg.roomCode}`);
+            }}
+            onOpenMobileScanner={(code) => {
+              setQrScannerRoomCode(code);
+              navigateTo('qr_scanner', `/qr-scanner?room=${code}`);
+            }}
+            onBackToHome={() => navigateTo('home', '/')}
+          />
+        )}
+
+        {currentView === 'qr_host' && qrSessionConfig && (
+          <QRHostScreen
+            roomCode={qrSessionConfig.roomCode}
+            pack={qrSessionConfig.pack}
+            students={qrSessionConfig.students}
+            recordedAnswers={qrRecordedAnswers}
+            isLocked={qrIsLocked}
+            isRevealed={qrIsRevealed}
+            currentQuestionIndex={qrQuestionIndex}
+            onLockAnswers={() => setQrIsLocked((prev) => !prev)}
+            onRevealAnswer={() => setQrIsRevealed((prev) => !prev)}
+            onNextQuestion={() => {
+              setQrAccumulatedAnswers((prev) => [
+                ...prev,
+                { qIndex: qrQuestionIndex, answers: qrRecordedAnswers },
+              ]);
+              setQrQuestionIndex((prev) => prev + 1);
+              setQrRecordedAnswers({});
+              setQrIsLocked(false);
+              setQrIsRevealed(false);
+            }}
+            onFinishQuiz={handleFinishQRQuiz}
+            onLaunchScannerLocal={() => {
+              setQrScannerRoomCode(qrSessionConfig.roomCode);
+              navigateTo('qr_scanner', `/qr-scanner?room=${qrSessionConfig.roomCode}`);
+            }}
+            onExit={() => navigateTo('qr_quiz', '/qr-quiz')}
+          />
+        )}
+
+        {currentView === 'qr_scanner' && (
+          <QRScannerHUD
+            roomCode={qrScannerRoomCode || qrSessionConfig?.roomCode || 'QR123'}
+            currentQuestion={
+              qrSessionConfig?.pack.questions[qrQuestionIndex] ||
+              getQRQuestionPacks()[0]?.questions[0]
+            }
+            questionIndex={qrQuestionIndex}
+            totalQuestions={qrSessionConfig?.pack.questions.length || 5}
+            students={qrSessionConfig?.students || getQRStudents()}
+            recordedAnswers={qrRecordedAnswers}
+            isLocked={qrIsLocked}
+            isRevealed={qrIsRevealed}
+            onRecordAnswer={(sub) => {
+              setQrRecordedAnswers((prev) => ({ ...prev, [sub.studentId]: sub }));
+            }}
+            onLockAnswers={() => setQrIsLocked((prev) => !prev)}
+            onRevealAnswer={() => setQrIsRevealed((prev) => !prev)}
+            onNextQuestion={() => {
+              setQrAccumulatedAnswers((prev) => [
+                ...prev,
+                { qIndex: qrQuestionIndex, answers: qrRecordedAnswers },
+              ]);
+              setQrQuestionIndex((prev) => prev + 1);
+              setQrRecordedAnswers({});
+              setQrIsLocked(false);
+              setQrIsRevealed(false);
+            }}
+            onExitScanner={() => {
+              if (qrSessionConfig) {
+                navigateTo('qr_host', `/qr-host?room=${qrSessionConfig.roomCode}`);
+              } else {
+                navigateTo('qr_quiz', '/qr-quiz');
+              }
+            }}
+          />
+        )}
       </main>
 
       {/* Preschool Footer on standard pages */}
-      {currentView !== 'host' && currentView !== 'player' && currentView !== 'builder' && (
-        <Footer onHome={() => navigateTo('home', '/')} />
-      )}
+      {currentView !== 'host' &&
+        currentView !== 'player' &&
+        currentView !== 'builder' &&
+        currentView !== 'qr_host' &&
+        currentView !== 'qr_scanner' && (
+          <Footer onHome={() => navigateTo('home', '/')} />
+        )}
 
       {/* Modal to choose game creation type */}
       <CreateGameTypeModal

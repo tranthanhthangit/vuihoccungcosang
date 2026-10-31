@@ -730,6 +730,26 @@ app.use((req, res, next) => {
 // In-memory authoritative sessions store
 const sessions = new Map<string, SessionState>();
 
+// In-memory QR Rotating Cards quiz sessions store
+export interface ServerQRSession {
+  roomCode: string;
+  packTitle: string;
+  className: string;
+  currentQIndex: number;
+  totalQuestions: number;
+  isLocked: boolean;
+  isRevealed: boolean;
+  answers: Record<string, {
+    studentId: string;
+    studentName: string;
+    answer: 'A' | 'B' | 'C' | 'D';
+    isCorrect?: boolean;
+    timestamp: number;
+  }>;
+  updatedAt: number;
+}
+const qrRooms = new Map<string, ServerQRSession>();
+
 // Socket metadata tracking
 interface SocketMeta {
   ws: WebSocket;
@@ -1211,6 +1231,100 @@ wss.on('connection', (ws: WebSocket) => {
       if (!meta) return;
 
       switch (msg.type) {
+        // ----------------------------------------------------
+        // QR QUIZ WEBSOCKET HANDLERS
+        // ----------------------------------------------------
+        case 'qr:join_room': {
+          const roomCode = String(msg.roomCode || '').trim().toUpperCase();
+          meta.roomCode = roomCode;
+          meta.role = msg.role || 'watcher';
+          const session = qrRooms.get(roomCode);
+          if (session) {
+            sendToSocket(ws, { type: 'qr:session_sync', data: { session } });
+          }
+          break;
+        }
+
+        case 'qr:submit_answer': {
+          const roomCode = String(msg.roomCode || meta.roomCode || '').trim().toUpperCase();
+          let session = qrRooms.get(roomCode);
+          if (!session) {
+            session = {
+              roomCode,
+              packTitle: 'Trắc nghiệm QR',
+              className: 'Lớp Mầm',
+              currentQIndex: 0,
+              totalQuestions: 5,
+              isLocked: false,
+              isRevealed: false,
+              answers: {},
+              updatedAt: Date.now(),
+            };
+            qrRooms.set(roomCode, session);
+          }
+          const submission = msg.submission;
+          if (submission && submission.studentId && !session.isLocked) {
+            session.answers[submission.studentId] = {
+              studentId: submission.studentId,
+              studentName: submission.studentName || 'Bé',
+              answer: submission.selectedAnswer || submission.answer || 'A',
+              isCorrect: submission.isCorrect,
+              timestamp: Date.now(),
+            };
+            session.updatedAt = Date.now();
+            broadcastToRoom(roomCode, {
+              type: 'qr:answer_recorded',
+              data: { submission: session.answers[submission.studentId] },
+            });
+          }
+          break;
+        }
+
+        case 'qr:lock': {
+          const roomCode = String(msg.roomCode || meta.roomCode || '').trim().toUpperCase();
+          const session = qrRooms.get(roomCode);
+          if (session) {
+            session.isLocked = msg.isLocked !== undefined ? msg.isLocked : true;
+            session.updatedAt = Date.now();
+            broadcastToRoom(roomCode, {
+              type: 'qr:lock_changed',
+              data: { isLocked: session.isLocked },
+            });
+          }
+          break;
+        }
+
+        case 'qr:reveal': {
+          const roomCode = String(msg.roomCode || meta.roomCode || '').trim().toUpperCase();
+          const session = qrRooms.get(roomCode);
+          if (session) {
+            session.isRevealed = msg.isRevealed !== undefined ? msg.isRevealed : true;
+            session.updatedAt = Date.now();
+            broadcastToRoom(roomCode, {
+              type: 'qr:reveal_changed',
+              data: { isRevealed: session.isRevealed },
+            });
+          }
+          break;
+        }
+
+        case 'qr:next_question': {
+          const roomCode = String(msg.roomCode || meta.roomCode || '').trim().toUpperCase();
+          const session = qrRooms.get(roomCode);
+          if (session) {
+            session.currentQIndex = (session.currentQIndex || 0) + 1;
+            session.isLocked = false;
+            session.isRevealed = false;
+            session.answers = {};
+            session.updatedAt = Date.now();
+            broadcastToRoom(roomCode, {
+              type: 'qr:question_changed',
+              data: { session },
+            });
+          }
+          break;
+        }
+
         // ----------------------------------------------------
         // HOST: CREATE SESSION
         // ----------------------------------------------------
@@ -2438,6 +2552,109 @@ app.get('/api/session/:roomCode', (req: Request, res: Response) => {
       ? getSanitizedSessionForPlayer(session, targetTeamId)
       : getSanitizedSessionForHost(session)
   });
+});
+
+// ----------------------------------------------------
+// QR ROTATING CARDS REST ENDPOINTS
+// ----------------------------------------------------
+app.post('/api/qr/session/init', (req: Request, res: Response) => {
+  const { roomCode, packTitle, className, totalQuestions } = req.body;
+  if (!roomCode) return res.status(400).json({ error: 'Missing roomCode' });
+  const code = String(roomCode).trim().toUpperCase();
+  const qrSession: ServerQRSession = {
+    roomCode: code,
+    packTitle: packTitle || 'Trắc nghiệm QR',
+    className: className || 'Lớp Mầm',
+    currentQIndex: 0,
+    totalQuestions: totalQuestions || 5,
+    isLocked: false,
+    isRevealed: false,
+    answers: {},
+    updatedAt: Date.now(),
+  };
+  qrRooms.set(code, qrSession);
+  broadcastToRoom(code, { type: 'qr:session_sync', data: { session: qrSession } });
+  res.json({ success: true, session: qrSession });
+});
+
+app.get('/api/qr/session/:roomCode', (req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  const code = (req.params.roomCode || '').trim().toUpperCase();
+  const session = qrRooms.get(code);
+  if (!session) return res.status(404).json({ error: 'QR Session not found' });
+  res.json({ session });
+});
+
+app.post('/api/qr/session/:roomCode/submit-answer', (req: Request, res: Response) => {
+  const code = (req.params.roomCode || '').trim().toUpperCase();
+  let session = qrRooms.get(code);
+  if (!session) {
+    session = {
+      roomCode: code,
+      packTitle: 'Trắc nghiệm QR',
+      className: 'Lớp Mầm',
+      currentQIndex: 0,
+      totalQuestions: 5,
+      isLocked: false,
+      isRevealed: false,
+      answers: {},
+      updatedAt: Date.now(),
+    };
+    qrRooms.set(code, session);
+  }
+
+  const { submission } = req.body;
+  if (submission && submission.studentId && !session.isLocked) {
+    session.answers[submission.studentId] = {
+      studentId: submission.studentId,
+      studentName: submission.studentName || 'Bé',
+      answer: submission.selectedAnswer || submission.answer || 'A',
+      isCorrect: submission.isCorrect,
+      timestamp: Date.now(),
+    };
+    session.updatedAt = Date.now();
+    broadcastToRoom(code, {
+      type: 'qr:answer_recorded',
+      data: { submission: session.answers[submission.studentId] },
+    });
+  }
+  res.json({ success: true, session });
+});
+
+app.post('/api/qr/session/:roomCode/lock', (req: Request, res: Response) => {
+  const code = (req.params.roomCode || '').trim().toUpperCase();
+  const session = qrRooms.get(code);
+  if (session) {
+    session.isLocked = req.body.isLocked !== undefined ? req.body.isLocked : true;
+    session.updatedAt = Date.now();
+    broadcastToRoom(code, { type: 'qr:lock_changed', data: { isLocked: session.isLocked } });
+  }
+  res.json({ success: true, session });
+});
+
+app.post('/api/qr/session/:roomCode/reveal', (req: Request, res: Response) => {
+  const code = (req.params.roomCode || '').trim().toUpperCase();
+  const session = qrRooms.get(code);
+  if (session) {
+    session.isRevealed = req.body.isRevealed !== undefined ? req.body.isRevealed : true;
+    session.updatedAt = Date.now();
+    broadcastToRoom(code, { type: 'qr:reveal_changed', data: { isRevealed: session.isRevealed } });
+  }
+  res.json({ success: true, session });
+});
+
+app.post('/api/qr/session/:roomCode/next-question', (req: Request, res: Response) => {
+  const code = (req.params.roomCode || '').trim().toUpperCase();
+  const session = qrRooms.get(code);
+  if (session) {
+    session.currentQIndex = (session.currentQIndex || 0) + 1;
+    session.isLocked = false;
+    session.isRevealed = false;
+    session.answers = {};
+    session.updatedAt = Date.now();
+    broadcastToRoom(code, { type: 'qr:question_changed', data: { session } });
+  }
+  res.json({ success: true, session });
 });
 
 function getLocalIpAddresses(): string[] {

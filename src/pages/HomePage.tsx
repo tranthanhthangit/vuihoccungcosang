@@ -42,6 +42,7 @@ interface HomePageProps {
   onCreateGame: () => void;
   onCreateDualRoom?: () => void;
   onJoinRoom: () => void;
+  onOpenQRQuiz?: () => void;
   onViewHistory: () => void;
   onOpenProfile?: () => void;
 }
@@ -52,6 +53,7 @@ export const HomePage: React.FC<HomePageProps> = ({
   onCreateGame,
   onCreateDualRoom,
   onJoinRoom,
+  onOpenQRQuiz,
   onViewHistory,
   onOpenProfile,
 }) => {
@@ -425,6 +427,36 @@ export const HomePage: React.FC<HomePageProps> = ({
           </button>
         </div>
       </div>
+
+      {/* FEATURE BANNER: BẢNG ĐÁP ÁN QR XOAY 4 HƯỚNG */}
+      {onOpenQRQuiz && (
+        <div className="mb-8 rounded-[24px] sm:rounded-[32px] p-5 sm:p-7 bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-300 text-slate-950 shadow-md border-2 border-amber-200 flex flex-col md:flex-row items-center justify-between gap-5 transition hover:shadow-lg">
+          <div className="space-y-1.5 text-center md:text-left">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-950 text-white font-black text-[11px] tracking-wider uppercase">
+              <span>⭐</span>
+              <span>Tính năng mới cho lớp mầm non</span>
+            </div>
+            <h3 className="text-xl sm:text-2xl font-black text-slate-950">
+              Bảng Đáp Án QR Xoay 4 Hướng
+            </h3>
+            <p className="text-xs sm:text-sm text-slate-900/80 font-medium max-w-2xl leading-relaxed">
+              Mỗi bé cầm một bảng đáp án cá nhân xoay để chọn A, B, C hoặc D. Cô giáo lia camera điện thoại quét toàn lớp tự động — không cần từng bé có điện thoại riêng!
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              sounds.playClick();
+              onOpenQRQuiz();
+            }}
+            className="px-6 py-3.5 rounded-2xl bg-slate-950 hover:bg-slate-900 text-white font-black text-xs sm:text-sm shadow-xl active:scale-95 transition flex items-center gap-2.5 whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <span>📱 Khám phá & Tổ chức ngay</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* ---------------------------------------------------- */}
       {/* 4 MAIN ACTION CARDS (2x2 GRID ON MOBILE / 4 ON DESKTOP) */}

@@ -1,6 +1,6 @@
 {
-  "summary":  "Kế hoạch triển khai tính năng Quản trị viên kiểm soát danh sách trò chơi hiển thị trên trang chủ:\n- Thêm tab \"Quản lý Trang chủ\" trong Bảng điều khiển Quản trị viên cho phép ghim/bỏ ghim, tìm kiếm, lọc và sắp xếp trò chơi.\n- Cập nhật trang chủ (HomePage) ưu tiên hiển thị trò chơi do Quản trị viên ghim kết hợp với trò chơi người dùng thả tim.\n- Bổ sung phân trang gọn gàng (tối đa 8 trò mỗi trang với nút chuyển trang/xem thêm) giúp giao diện không bị kéo dài khi số lượng trò chơi tăng cao.",
-  "updatedAt":  "2026-10-29T07:35:38.943927844Z",
+  "summary":  "Kế hoạch kiến trúc và triển khai Module Bảng Đáp Án QR Xoay 4 Hướng (Plickers style) dành cho lớp học mầm non, bao gồm 5 phân hệ: Quản lý học sinh, In bảng QR chuẩn nhận diện, Ngân hàng câu hỏi QR, Tổ chức trò chơi 2 màn hình (TV chiếu + Điện thoại quét lia tự động), Kết quả và lưu trữ lịch sử.",
+  "updatedAt":  "2026-10-30T07:57:18.250906322Z",
   "requestFeedback":  true,
   "userFacing":  true
 }
