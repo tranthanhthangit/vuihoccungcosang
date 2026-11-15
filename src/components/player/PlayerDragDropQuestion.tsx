@@ -73,6 +73,8 @@ export const PlayerDragDropQuestion: React.FC<PlayerDragDropQuestionProps> = ({
   placementsRef.current = placements;
   const hasSubmittedRef = useRef(hasSubmitted);
   hasSubmittedRef.current = hasSubmitted;
+  const onSubmitPlacementsRef = useRef(onSubmitPlacements);
+  onSubmitPlacementsRef.current = onSubmitPlacements;
 
   const [isSpeaking, setIsSpeaking] = useState(false);
 
@@ -116,14 +118,14 @@ export const PlayerDragDropQuestion: React.FC<PlayerDragDropQuestionProps> = ({
     }
   };
 
-  // Auto-submit placements when unmounted if not submitted yet
+  // Auto-submit placements ONLY when genuinely unmounted if not submitted yet
   useEffect(() => {
     return () => {
       if (!hasSubmittedRef.current) {
-        onSubmitPlacements(placementsRef.current, true);
+        onSubmitPlacementsRef.current(placementsRef.current, true);
       }
     };
-  }, [onSubmitPlacements]);
+  }, []);
 
   // Calculate scaled dimension to fit mobile screen perfectly without distortion
   useEffect(() => {

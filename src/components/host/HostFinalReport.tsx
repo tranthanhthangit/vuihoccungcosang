@@ -32,15 +32,24 @@ export const HostFinalReport: React.FC<HostFinalReportProps> = ({
   const [gradeModalTarget, setGradeModalTarget] = useState<{ questionIndex: number; teamId: string } | null>(null);
 
   const questions = session.game.questions;
+  const maxQuestionCount = session.isDualMode && session.gameB
+    ? Math.max(session.game.questions.length, session.gameB.questions.length)
+    : session.game.questions.length;
   const teamsList = Object.values(session.teams);
+
+  const getTeamQuestions = (teamId: string, assignedSet?: 'A' | 'B') => {
+    const isB = session.isDualMode && ((assignedSet || session.teamAssignments?.[teamId] || session.teams[teamId]?.assignedSet) === 'B');
+    return (isB && session.gameB?.questions) ? session.gameB.questions : session.game.questions;
+  };
 
   // Compute standings
   const standings: LeaderboardEntry[] = teamsList.map(team => {
+    const teamQs = getTeamQuestions(team.teamId, team.assignedSet);
     let correctCount = 0;
     let totalAnswered = 0;
     let totalTime = 0;
 
-    questions.forEach((_, qIdx) => {
+    teamQs.forEach((_, qIdx) => {
       const ans = session.answers[qIdx]?.[team.teamId];
       if (ans) {
         totalAnswered++;
@@ -105,11 +114,13 @@ export const HostFinalReport: React.FC<HostFinalReportProps> = ({
     if (winner) {
       saveGameHistory({
         id: session.sessionId,
-        gameTitle: session.game.title,
+        gameTitle: session.isDualMode && session.gameB
+          ? `${session.game.title} & ${session.gameB.title}`
+          : session.game.title,
         roomCode: session.roomCode,
         date: Date.now(),
         teamsCount: teamsList.length,
-        questionsCount: questions.length,
+        questionsCount: maxQuestionCount,
         winnerTeamName: winner.teamName,
         winnerScore: winner.score,
         teacherEmail: currentUser?.email,
@@ -122,27 +133,34 @@ export const HostFinalReport: React.FC<HostFinalReportProps> = ({
   const handleExportCSV = () => {
     sounds.playClick();
     const isAdvanced = isPremium || isAdmin;
-    let csv = `BÁO CÁO TỔNG KẾT TRÒ CHƠI: ${session.game.title}\n`;
+    const reportTitle = session.isDualMode && session.gameB
+      ? `${session.game.title} & ${session.gameB.title}`
+      : session.game.title;
+    let csv = `BÁO CÁO TỔNG KẾT TRÒ CHƠI: ${reportTitle}\n`;
     csv += `Mã phòng: ${session.roomCode}, Ngày: ${new Date().toLocaleDateString('vi-VN')}\n`;
     csv += `Loại báo cáo: ${isAdvanced ? 'Báo cáo chi tiết nâng cao (VIP Premium)' : 'Báo cáo kết quả cơ bản (Giáo viên Member)'}\n\n`;
 
     // Table 1: Rankings & Totals (Available for both Member and Premium)
     csv += 'Hạng,Tên Đội,Điểm Số,Số Câu Đúng,Tổng Số Câu,Tỷ Lệ Đúng,Thời Gian TB (s)\n';
     standings.forEach(s => {
-      const accuracy = questions.length > 0 ? Math.round((s.correctCount / questions.length) * 100) : 0;
-      csv += `${s.rank},"${s.teamName}",${s.score},${s.correctCount},${questions.length},${accuracy}%,${(s.avgResponseTimeMs / 1000).toFixed(1)}\n`;
+      const teamQs = getTeamQuestions(s.teamId);
+      const accuracy = teamQs.length > 0 ? Math.round((s.correctCount / teamQs.length) * 100) : 0;
+      csv += `${s.rank},"${s.teamName}",${s.score},${s.correctCount},${teamQs.length},${accuracy}%,${(s.avgResponseTimeMs / 1000).toFixed(1)}\n`;
     });
 
     if (isAdvanced) {
       // Table 2: Detailed question-by-question breakdown (Premium/Admin exclusive)
       csv += '\nCHI TIẾT TỪNG CÂU HỎI & ĐÁP ÁN TỪNG ĐỘI (TÍNH NĂNG NÂNG CAO VIP):\n';
       csv += 'Câu,Nội Dung,Đội,Đáp Án Chọn,Kết Quả,Điểm,Thời Gian (s)\n';
-      questions.forEach((q, qIdx) => {
+      for (let qIdx = 0; qIdx < maxQuestionCount; qIdx++) {
         teamsList.forEach(t => {
+          const teamQs = getTeamQuestions(t.teamId, t.assignedSet);
+          const q = teamQs[qIdx];
+          if (!q) return;
           const ans = session.answers[qIdx]?.[t.teamId];
           csv += `${qIdx + 1},"${q.title.replace(/"/g, '""')}","${t.teamName}","${ans ? ans.answerText.replace(/"/g, '""') : 'Không'}",${ans?.isCorrect ? 'ĐÚNG' : 'SAI'},${ans?.pointsAwarded || 0},${ans ? (ans.responseTimeMs / 1000).toFixed(1) : 0}\n`;
         });
-      });
+      }
     } else {
       csv += '\n(*) Lưu ý: Tài khoản Member xuất kết quả cơ bản. Để xuất phân tích chi tiết từng câu hỏi và thời gian phản hồi, cô có thể nâng cấp tài khoản Giáo viên (Premium).\n';
     }
@@ -155,6 +173,7 @@ export const HostFinalReport: React.FC<HostFinalReportProps> = ({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const handlePrint = () => {
@@ -162,12 +181,14 @@ export const HostFinalReport: React.FC<HostFinalReportProps> = ({
     window.print();
   };
 
-  // Overall statistics
-  const totalAnswersPossible = questions.length * teamsList.length;
+  // Overall statistics (respecting each team's assigned question set in Dual Mode)
+  let totalAnswersPossible = 0;
   let totalCorrect = 0;
   let totalSubmitted = 0;
-  questions.forEach((_, qIdx) => {
-    teamsList.forEach(t => {
+  teamsList.forEach(t => {
+    const teamQs = getTeamQuestions(t.teamId, t.assignedSet);
+    totalAnswersPossible += teamQs.length;
+    teamQs.forEach((_, qIdx) => {
       const ans = session.answers[qIdx]?.[t.teamId];
       if (ans) {
         totalSubmitted++;
@@ -283,7 +304,7 @@ export const HostFinalReport: React.FC<HostFinalReportProps> = ({
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
         <div className="bg-white p-5 rounded-3xl border-2 border-slate-100 shadow-sm text-center">
           <span className="text-xs font-black uppercase text-slate-400">TỔNG SỐ CÂU</span>
-          <div className="text-3xl font-black text-slate-800 mt-1">{questions.length}</div>
+          <div className="text-3xl font-black text-slate-800 mt-1">{maxQuestionCount}</div>
         </div>
         <div className="bg-white p-5 rounded-3xl border-2 border-slate-100 shadow-sm text-center">
           <span className="text-xs font-black uppercase text-slate-400">SỐ ĐỘI THAM GIA</span>
@@ -356,7 +377,7 @@ export const HostFinalReport: React.FC<HostFinalReportProps> = ({
             <thead>
               <tr className="border-b-2 border-slate-100 text-xs font-black text-slate-400 uppercase">
                 <th className="py-3 px-4">Hạng & Đội</th>
-                {questions.map((_, idx) => (
+                {Array.from({ length: maxQuestionCount }).map((_, idx) => (
                   <th key={idx} className="py-3 px-3 text-center">
                     Câu {idx + 1}
                   </th>
@@ -381,13 +402,20 @@ export const HostFinalReport: React.FC<HostFinalReportProps> = ({
                       </div>
                     </td>
 
-                    {questions.map((_, qIdx) => {
+                    {Array.from({ length: maxQuestionCount }).map((_, qIdx) => {
                       const ans = session.answers[qIdx]?.[team.teamId];
                       const isTeamB = session.isDualMode && (team.assignedSet === 'B' || session.teamAssignments?.[team.teamId] === 'B');
                       const teamQuestion = (ans?.questionId && (session.gameB?.questions.find(item => item.id === ans.questionId) || session.game.questions.find(item => item.id === ans.questionId)))
                         || (isTeamB && session.gameB?.questions[qIdx])
                         || session.game.questions[qIdx];
                       const q = teamQuestion || questions[qIdx];
+                      if (!q) {
+                        return (
+                          <td key={qIdx} className="py-3 px-2 text-center">
+                            <span className="text-slate-300 text-xs font-bold">-</span>
+                          </td>
+                        );
+                      }
                       const isDrag = q.type === 'drag_drop' || Boolean(q.canvasConfig) || Boolean(ans?.actions?.length);
                       const isHtml = !isDrag && Boolean(
                         q.type === 'html_game' ||
@@ -499,38 +527,67 @@ export const HostFinalReport: React.FC<HostFinalReportProps> = ({
       {/* VIEW 2: By Question Breakdown */}
       {activeTab === 'byQuestion' && (
         <div className="flex flex-col gap-4">
-          {questions.map((q, qIdx) => {
-            const answers = session.answers[qIdx] || {};
-            const correctOptions = q.options?.filter(o => o.isCorrect) || [];
-            const correctOptionText = correctOptions.length > 0
-              ? correctOptions.map(o => o.text).join(' • ')
-              : '---';
-            const isHtml = Boolean(
-              q.type === 'html_game' ||
-              q.htmlContent ||
-              q.gameUrl ||
-              session.game.gameUrl ||
-              session.game.gameType === 'html_game' ||
-              session.game.isZipArchive
-            );
-            const isDrag = q.type === 'drag_drop' && Boolean(q.canvasConfig);
-            const isOpenEnded = q.type === 'open_ended';
+          {Array.from({ length: maxQuestionCount }).flatMap((_, qIdx) => {
+            const setConfigs: Array<{ setLabel: 'A' | 'B' | null; qObj: typeof questions[number] | undefined; setTeams: typeof teamsList }> =
+              session.isDualMode && session.gameB
+                ? [
+                    {
+                      setLabel: 'A',
+                      qObj: session.game.questions[qIdx],
+                      setTeams: teamsList.filter(t => (session.teamAssignments?.[t.teamId] || t.assignedSet || 'A') === 'A'),
+                    },
+                    {
+                      setLabel: 'B',
+                      qObj: session.gameB.questions[qIdx],
+                      setTeams: teamsList.filter(t => (session.teamAssignments?.[t.teamId] || t.assignedSet) === 'B'),
+                    },
+                  ]
+                : [{ setLabel: null, qObj: questions[qIdx], setTeams: teamsList }];
 
-            return (
-              <div key={q.id} className="bg-white rounded-3xl p-6 border-2 border-slate-100 shadow-md">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100 mb-4">
-                  <div>
-                    <span className={`text-xs font-black px-2.5 py-1 rounded-full uppercase ${
-                      isOpenEnded
-                        ? 'text-purple-700 bg-purple-50'
-                        : isHtml
-                        ? 'text-indigo-600 bg-indigo-50'
-                        : isDrag
-                        ? 'text-cyan-700 bg-cyan-50'
-                        : 'text-amber-700 bg-amber-50'
-                    }`}>
-                      Câu {qIdx + 1} · {isOpenEnded ? 'Câu hỏi tự luận (Bé vẽ & viết)' : isHtml ? 'Trò chơi Gói ZIP / HTML5' : isDrag ? 'Trò chơi kéo thả' : 'Trắc nghiệm'}
-                    </span>
+            return setConfigs
+              .filter((cfg): cfg is { setLabel: 'A' | 'B' | null; qObj: NonNullable<typeof cfg.qObj>; setTeams: typeof teamsList } => Boolean(cfg.qObj))
+              .map(({ setLabel, qObj: q, setTeams }) => {
+                const answers = session.answers[qIdx] || {};
+                const correctOptions = q.options?.filter(o => o.isCorrect) || [];
+                const correctOptionText = correctOptions.length > 0
+                  ? correctOptions.map(o => o.text).join(' • ')
+                  : '---';
+                const setGame = setLabel === 'B' && session.gameB ? session.gameB : session.game;
+                const isHtml = Boolean(
+                  q.type === 'html_game' ||
+                  q.htmlContent ||
+                  q.gameUrl ||
+                  setGame.gameUrl ||
+                  setGame.gameType === 'html_game' ||
+                  setGame.isZipArchive
+                );
+                const isDrag = q.type === 'drag_drop' && Boolean(q.canvasConfig);
+                const isOpenEnded = q.type === 'open_ended';
+
+                return (
+                  <div key={`${setLabel || 'single'}_${q.id}_${qIdx}`} className="bg-white rounded-3xl p-6 border-2 border-slate-100 shadow-md">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100 mb-4">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {setLabel && (
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase ${
+                              setLabel === 'B' ? 'bg-pink-100 text-pink-800 border border-pink-200' : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                            }`}>
+                              {setLabel === 'B' ? 'Đề B' : 'Đề A'}
+                            </span>
+                          )}
+                          <span className={`text-xs font-black px-2.5 py-1 rounded-full uppercase ${
+                            isOpenEnded
+                              ? 'text-purple-700 bg-purple-50'
+                              : isHtml
+                              ? 'text-indigo-600 bg-indigo-50'
+                              : isDrag
+                              ? 'text-cyan-700 bg-cyan-50'
+                              : 'text-amber-700 bg-amber-50'
+                          }`}>
+                            Câu {qIdx + 1} · {isOpenEnded ? 'Câu hỏi tự luận (Bé vẽ & viết)' : isHtml ? 'Trò chơi Gói ZIP / HTML5' : isDrag ? 'Trò chơi kéo thả' : 'Trắc nghiệm'}
+                          </span>
+                        </div>
                     <h4 className="text-lg font-black text-slate-900 mt-1">
                       {q.title}
                     </h4>
@@ -577,7 +634,7 @@ export const HostFinalReport: React.FC<HostFinalReportProps> = ({
                 )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {teamsList.map(t => {
+                  {(setTeams.length > 0 ? setTeams : teamsList).map(t => {
                     const ans = answers[t.teamId];
                     const isAnsCorrect = Boolean(ans?.isCorrect);
                     const htmlDet = ans?.htmlDetails;
@@ -805,7 +862,8 @@ export const HostFinalReport: React.FC<HostFinalReportProps> = ({
                   })}
                 </div>
               </div>
-            );
+                );
+              });
           })}
         </div>
       )}
@@ -835,7 +893,7 @@ export const HostFinalReport: React.FC<HostFinalReportProps> = ({
                         {team.teamName}
                       </h4>
                       <p className="text-xs font-bold text-slate-500">
-                        Đúng: {team.correctCount}/{questions.length} câu · TB {(team.avgResponseTimeMs / 1000).toFixed(1)}s/câu
+                        Đúng: {team.correctCount}/{getTeamQuestions(team.teamId).length} câu · TB {(team.avgResponseTimeMs / 1000).toFixed(1)}s/câu
                       </p>
                     </div>
                   </div>
@@ -871,14 +929,14 @@ export const HostFinalReport: React.FC<HostFinalReportProps> = ({
                 {isExpanded && (
                   <div className="p-5 pt-0 border-t border-slate-100 bg-slate-50/50">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-                      {questions.map((_, qIdx) => {
+                      {getTeamQuestions(team.teamId).map((fallbackQ, qIdx) => {
                         const ans = session.answers[qIdx]?.[team.teamId];
                         const htmlDet = ans?.htmlDetails;
                         const isTeamB = session.isDualMode && (team.assignedSet === 'B' || session.teamAssignments?.[team.teamId] === 'B');
                         const realQ = (ans?.questionId && (session.gameB?.questions.find(item => item.id === ans.questionId) || session.game.questions.find(item => item.id === ans.questionId)))
                           || (isTeamB && session.gameB?.questions[qIdx])
                           || session.game.questions[qIdx];
-                        const q = realQ || questions[qIdx];
+                        const q = realQ || fallbackQ;
                         const isDrag = q.type === 'drag_drop' || Boolean(q.canvasConfig) || Boolean(ans?.actions?.length);
                         const isHtml = !isDrag && Boolean(
                           q.type === 'html_game' ||

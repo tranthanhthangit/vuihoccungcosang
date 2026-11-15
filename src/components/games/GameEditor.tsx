@@ -34,7 +34,7 @@ export const GameEditor: React.FC<GameEditorProps> = ({
         type: 'multiple_choice',
         timeLimit: 0,
         noTimeLimit: true,
-        points: 10,
+        points: 1,
         explanation: 'Lời khen và lời giải thích ngắn gọn cho bé.',
         options: [
           { id: 'opt_1', text: 'Đáp án A', isCorrect: true },
@@ -56,7 +56,7 @@ export const GameEditor: React.FC<GameEditorProps> = ({
       type: 'multiple_choice',
       timeLimit: 0,
       noTimeLimit: true,
-      points: 10,
+      points: 1,
       explanation: '',
       options: [
         { id: 'opt_1', text: 'Đáp án 1', isCorrect: true },

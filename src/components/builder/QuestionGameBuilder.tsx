@@ -77,7 +77,7 @@ export const QuestionGameBuilder: React.FC<QuestionGameBuilderProps> = ({
         allowMultipleCorrect: true,
         readQuestionAudio: true,
         timeLimit: 25,
-        points: 10,
+        points: 1,
         explanation: 'Hoan hô bé! Con vịt và con cá đều biết bơi dưới nước rất giỏi đấy!',
         options: [
           { id: 'opt_1', text: 'Con vịt', isCorrect: true },
@@ -94,7 +94,7 @@ export const QuestionGameBuilder: React.FC<QuestionGameBuilderProps> = ({
         readQuestionAudio: true,
         timeLimit: 0,
         noTimeLimit: true,
-        points: 10,
+        points: 1,
         explanation: 'Đúng rồi, quả táo khi chín có màu đỏ tươi ngon tuyệt!',
         options: [
           { id: 'opt_21', text: 'Quả táo', isCorrect: true },
@@ -164,7 +164,7 @@ export const QuestionGameBuilder: React.FC<QuestionGameBuilderProps> = ({
       readQuestionAudio: true,
       timeLimit: 0,
       noTimeLimit: true,
-      points: 10,
+      points: 1,
       explanation: 'Bé đã trả lời rất xuất sắc!',
       options: [
         { id: 'opt_' + Date.now() + '_1', text: 'Đáp án A', isCorrect: true },
@@ -193,7 +193,7 @@ export const QuestionGameBuilder: React.FC<QuestionGameBuilderProps> = ({
       readQuestionAudio: true,
       timeLimit: 0,
       noTimeLimit: true,
-      points: 10,
+      points: 1,
       options: [],
     };
 
@@ -222,7 +222,8 @@ export const QuestionGameBuilder: React.FC<QuestionGameBuilderProps> = ({
   // Delete current question
   const handleDeleteQuestion = (indexToDelete: number) => {
     if (questions.length <= 1) {
-      alert('Bộ trò chơi cần có ít nhất 1 câu hỏi.');
+      setErrorBanner('Bộ trò chơi cần có ít nhất 1 câu hỏi.');
+      sounds.playWrong();
       return;
     }
     sounds.playClick();
@@ -400,7 +401,8 @@ export const QuestionGameBuilder: React.FC<QuestionGameBuilderProps> = ({
   const handleAddOption = () => {
     if (!currentQuestion) return;
     if (currentQuestion.options.length >= 6) {
-      alert('Tối đa 6 đáp án cho mỗi câu hỏi mầm non.');
+      setErrorBanner('Tối đa 6 đáp án cho mỗi câu hỏi mầm non.');
+      sounds.playWrong();
       return;
     }
     sounds.playClick();
@@ -418,7 +420,8 @@ export const QuestionGameBuilder: React.FC<QuestionGameBuilderProps> = ({
   const handleRemoveOption = (optId: string) => {
     if (!currentQuestion) return;
     if (currentQuestion.options.length <= 2) {
-      alert('Câu hỏi cần có ít nhất 2 đáp án để bé lựa chọn.');
+      setErrorBanner('Câu hỏi cần có ít nhất 2 đáp án để bé lựa chọn.');
+      sounds.playWrong();
       return;
     }
     sounds.playClick();
@@ -961,15 +964,17 @@ export const QuestionGameBuilder: React.FC<QuestionGameBuilderProps> = ({
                   <div className="flex items-center gap-1 text-xs font-extrabold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-xl">
                     <Award className="w-3.5 h-3.5 text-indigo-500" />
                     <select
-                      value={currentQuestion.points || 10}
+                      value={currentQuestion.points || 1}
                       onChange={(e) =>
                         handleUpdateCurrentQuestion({ points: Number(e.target.value) })
                       }
                       className="bg-transparent border-0 outline-none font-mono cursor-pointer"
                     >
+                      <option value="1">1 điểm (Mặc định)</option>
+                      <option value="2">2 điểm</option>
+                      <option value="3">3 điểm</option>
+                      <option value="5">5 điểm</option>
                       <option value="10">10 điểm</option>
-                      <option value="20">20 điểm</option>
-                      <option value="30">30 điểm</option>
                     </select>
                   </div>
                 </div>

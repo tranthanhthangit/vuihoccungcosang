@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { QRSessionHistoryRecord } from '../../types/qrQuiz';
 import { getQRSessionsHistory, deleteQRSessionHistory } from '../../services/qrStorage';
+import { Modal } from '../common/Modal';
 
 export const QRSessionHistory: React.FC = () => {
   const [historyList, setHistoryList] = useState<QRSessionHistoryRecord[]>(() =>
@@ -9,6 +10,7 @@ export const QRSessionHistory: React.FC = () => {
   const [selectedRecord, setSelectedRecord] = useState<QRSessionHistoryRecord | null>(
     () => historyList[0] || null
   );
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const refreshList = () => {
     const list = getQRSessionsHistory();
@@ -19,9 +21,7 @@ export const QRSessionHistory: React.FC = () => {
   };
 
   const handleDelete = (recordId: string) => {
-    if (!window.confirm('Cô có chắc muốn xóa bản ghi lịch sử này?')) return;
-    deleteQRSessionHistory(recordId);
-    refreshList();
+    setPendingDeleteId(recordId);
   };
 
   // Export report to CSV
@@ -303,6 +303,23 @@ export const QRSessionHistory: React.FC = () => {
           )}
         </div>
       </div>
+
+      <Modal
+        isOpen={Boolean(pendingDeleteId)}
+        title="Xóa bản ghi lịch sử?"
+        message="Cô có chắc chắn muốn xóa bản ghi lịch sử chơi QR này không?"
+        confirmText="Xóa"
+        cancelText="Hủy"
+        confirmVariant="danger"
+        onConfirm={() => {
+          if (pendingDeleteId) {
+            deleteQRSessionHistory(pendingDeleteId);
+            refreshList();
+          }
+          setPendingDeleteId(null);
+        }}
+        onCancel={() => setPendingDeleteId(null)}
+      />
     </div>
   );
 };

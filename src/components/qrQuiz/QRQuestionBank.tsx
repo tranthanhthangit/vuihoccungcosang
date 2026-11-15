@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef } from 'react';
+import { Crown, ImagePlus, Lock, Trash2, AlertCircle, X } from 'lucide-react';
 import { QRQuestionPack, QRQuestion } from '../../types/qrQuiz';
 import {
   getQRQuestionPacks,
@@ -6,12 +7,49 @@ import {
   deleteQRQuestionPack,
 } from '../../services/qrStorage';
 import { DEFAULT_GAMES } from '../../data/defaultGames';
+import { speakQuestionWithOptions, stopSpeaking, unlockSpeechAudio } from '../../utils/speechVoice';
+import { Modal } from '../common/Modal';
+import { useAuth } from '../../context/AuthContext';
+
+const compressImageFile = (file: File, maxDim = 480): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Không thể đọc tệp ảnh'));
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const img = new Image();
+      img.onerror = () => resolve(dataUrl);
+      img.onload = () => {
+        const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
+        if (scale >= 1 && dataUrl.length < 180000) {
+          resolve(dataUrl);
+          return;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(dataUrl);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const isPngOrSvg = file.type === 'image/png' || file.type === 'image/svg+xml' || file.type === 'image/webp';
+        resolve(canvas.toDataURL(isPngOrSvg ? 'image/png' : 'image/jpeg', 0.85));
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  });
+};
 
 interface QRQuestionBankProps {
   onSelectPackToPlay?: (pack: QRQuestionPack) => void;
 }
 
 export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPlay }) => {
+  const { isPremium, isAdmin } = useAuth();
+  const canUseOptionImages = isPremium || isAdmin;
   const [packs, setPacks] = useState<QRQuestionPack[]>(() => getQRQuestionPacks());
   const [activePackId, setActivePackId] = useState<string>(() => packs[0]?.id || '');
   const [searchQuery, setSearchQuery] = useState('');
@@ -31,6 +69,8 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
   // Question edit modal
   const [isQuestionModalOpen, setIsQuestionModalOpen] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<QRQuestion | null>(null);
+  const [questionFormError, setQuestionFormError] = useState<string | null>(null);
+  const [isPremiumUpgradeModalOpen, setIsPremiumUpgradeModalOpen] = useState(false);
   const [questionFormData, setQuestionFormData] = useState<{
     prompt: string;
     imageUrl: string;
@@ -38,8 +78,11 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
     optionB: string;
     optionC: string;
     optionD: string;
+    optionAImage: string;
+    optionBImage: string;
+    optionCImage: string;
+    optionDImage: string;
     correctAnswer: 'A' | 'B' | 'C' | 'D';
-    explanation: string;
     points: number;
     timeLimitSeconds?: number;
     difficulty: 'easy' | 'medium' | 'hard';
@@ -50,18 +93,28 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
     optionB: '',
     optionC: '',
     optionD: '',
+    optionAImage: '',
+    optionBImage: '',
+    optionCImage: '',
+    optionDImage: '',
     correctAnswer: 'A',
-    explanation: '',
-    points: 10,
+    points: 1,
     timeLimitSeconds: 20,
     difficulty: 'easy',
   });
 
   // Import modal from existing default games
   const [isImportGameModalOpen, setIsImportGameModalOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<{ type: 'pack' | 'question'; id: string } | null>(null);
 
   const questionImageInputRef = useRef<HTMLInputElement>(null);
   const packImageInputRef = useRef<HTMLInputElement>(null);
+  const optionImageInputRefs = useRef<Record<'A' | 'B' | 'C' | 'D', HTMLInputElement | null>>({
+    A: null,
+    B: null,
+    C: null,
+    D: null,
+  });
 
   const refreshPacks = () => {
     const list = getQRQuestionPacks();
@@ -95,14 +148,10 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
     });
   }, [packs, selectedTopic, searchQuery]);
 
-  // Handle TTS speech
-  const speakText = (text: string) => {
-    if (!('speechSynthesis' in window)) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'vi-VN';
-    utterance.rate = 0.9;
-    window.speechSynthesis.speak(utterance);
+  // Handle TTS speech with question and answer options support
+  const speakText = (text: string, options?: Array<{ text?: string } | string>) => {
+    unlockSpeechAudio();
+    speakQuestionWithOptions(text, options || []);
   };
 
   // Pack CRUD
@@ -150,9 +199,7 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
   };
 
   const handleDeletePack = (packId: string) => {
-    if (!window.confirm('Cô có chắc chắn muốn xóa bộ đề này không?')) return;
-    deleteQRQuestionPack(packId);
-    refreshPacks();
+    setPendingDelete({ type: 'pack', id: packId });
   };
 
   const handleDuplicatePack = (pack: QRQuestionPack) => {
@@ -175,6 +222,7 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
   // Question CRUD
   const handleOpenAddQuestion = () => {
     setEditingQuestion(null);
+    setQuestionFormError(null);
     setQuestionFormData({
       prompt: '',
       imageUrl: '',
@@ -182,9 +230,12 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
       optionB: '',
       optionC: '',
       optionD: '',
+      optionAImage: '',
+      optionBImage: '',
+      optionCImage: '',
+      optionDImage: '',
       correctAnswer: 'A',
-      explanation: '',
-      points: 10,
+      points: 1,
       timeLimitSeconds: 20,
       difficulty: 'easy',
     });
@@ -193,6 +244,7 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
 
   const handleOpenEditQuestion = (q: QRQuestion) => {
     setEditingQuestion(q);
+    setQuestionFormError(null);
     setQuestionFormData({
       prompt: q.prompt || q.title || '',
       imageUrl: q.imageUrl || '',
@@ -200,37 +252,103 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
       optionB: q.options?.B?.text || q.optionB || '',
       optionC: q.options?.C?.text || q.optionC || '',
       optionD: q.options?.D?.text || q.optionD || '',
+      optionAImage: q.options?.A?.imageUrl || '',
+      optionBImage: q.options?.B?.imageUrl || '',
+      optionCImage: q.options?.C?.imageUrl || '',
+      optionDImage: q.options?.D?.imageUrl || '',
       correctAnswer: q.correctAnswer,
-      explanation: q.explanation || '',
-      points: q.points || 10,
+      points: q.points || 1,
       timeLimitSeconds: q.timeLimitSeconds || 20,
       difficulty: q.difficulty || 'easy',
     });
     setIsQuestionModalOpen(true);
   };
 
+  const handleUploadOptionImage = async (letter: 'A' | 'B' | 'C' | 'D', file?: File) => {
+    if (!canUseOptionImages) {
+      setIsPremiumUpgradeModalOpen(true);
+      return;
+    }
+    if (!file) return;
+    try {
+      const compressed = await compressImageFile(file, 480);
+      const imgKey = `option${letter}Image` as
+        | 'optionAImage'
+        | 'optionBImage'
+        | 'optionCImage'
+        | 'optionDImage';
+      setQuestionFormData((p) => ({ ...p, [imgKey]: compressed }));
+      setQuestionFormError(null);
+    } catch {
+      setQuestionFormError(`Không thể tải hình ảnh cho đáp án ${letter}.`);
+    }
+  };
+
   const handleSaveQuestion = (e: React.FormEvent) => {
     e.preventDefault();
     if (!activePack) return;
-    if (!questionFormData.prompt.trim()) return;
+    if (!questionFormData.prompt.trim()) {
+      setQuestionFormError('Vui lòng nhập nội dung câu hỏi.');
+      return;
+    }
+
+    const optPairs: Array<{ letter: 'A' | 'B' | 'C' | 'D'; text: string; img: string }> = [
+      {
+        letter: 'A',
+        text: questionFormData.optionA.trim(),
+        img: canUseOptionImages
+          ? questionFormData.optionAImage
+          : (editingQuestion?.options?.A?.imageUrl || ''),
+      },
+      {
+        letter: 'B',
+        text: questionFormData.optionB.trim(),
+        img: canUseOptionImages
+          ? questionFormData.optionBImage
+          : (editingQuestion?.options?.B?.imageUrl || ''),
+      },
+      {
+        letter: 'C',
+        text: questionFormData.optionC.trim(),
+        img: canUseOptionImages
+          ? questionFormData.optionCImage
+          : (editingQuestion?.options?.C?.imageUrl || ''),
+      },
+      {
+        letter: 'D',
+        text: questionFormData.optionD.trim(),
+        img: canUseOptionImages
+          ? questionFormData.optionDImage
+          : (editingQuestion?.options?.D?.imageUrl || ''),
+      },
+    ];
+
+    const emptyOpt = optPairs.find((o) => !o.text && !o.img);
+    if (emptyOpt) {
+      setQuestionFormError(
+        canUseOptionImages
+          ? `Vui lòng nhập nội dung hoặc thêm hình ảnh cho đáp án ${emptyOpt.letter}.`
+          : `Vui lòng nhập nội dung cho đáp án ${emptyOpt.letter}.`
+      );
+      return;
+    }
 
     const newQuestion: QRQuestion = {
       id: editingQuestion?.id || `q_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       title: questionFormData.prompt.trim(),
       prompt: questionFormData.prompt.trim(),
       imageUrl: questionFormData.imageUrl,
-      optionA: questionFormData.optionA.trim(),
-      optionB: questionFormData.optionB.trim(),
-      optionC: questionFormData.optionC.trim(),
-      optionD: questionFormData.optionD.trim(),
+      optionA: optPairs[0].text,
+      optionB: optPairs[1].text,
+      optionC: optPairs[2].text,
+      optionD: optPairs[3].text,
       options: {
-        A: { text: questionFormData.optionA.trim() },
-        B: { text: questionFormData.optionB.trim() },
-        C: { text: questionFormData.optionC.trim() },
-        D: { text: questionFormData.optionD.trim() },
+        A: { text: optPairs[0].text, ...(optPairs[0].img ? { imageUrl: optPairs[0].img } : {}) },
+        B: { text: optPairs[1].text, ...(optPairs[1].img ? { imageUrl: optPairs[1].img } : {}) },
+        C: { text: optPairs[2].text, ...(optPairs[2].img ? { imageUrl: optPairs[2].img } : {}) },
+        D: { text: optPairs[3].text, ...(optPairs[3].img ? { imageUrl: optPairs[3].img } : {}) },
       },
       correctAnswer: questionFormData.correctAnswer,
-      explanation: questionFormData.explanation.trim(),
       points: questionFormData.points,
       timeLimitSeconds: questionFormData.timeLimitSeconds,
       difficulty: questionFormData.difficulty,
@@ -250,19 +368,14 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
       questions: updatedQuestions,
     });
 
+    setQuestionFormError(null);
     setIsQuestionModalOpen(false);
     refreshPacks();
   };
 
   const handleDeleteQuestion = (qId: string) => {
     if (!activePack) return;
-    if (!window.confirm('Cô có chắc muốn xóa câu hỏi này không?')) return;
-    const updatedQuestions = activePack.questions.filter((q) => q.id !== qId);
-    saveQRQuestionPack({
-      ...activePack,
-      questions: updatedQuestions,
-    });
-    refreshPacks();
+    setPendingDelete({ type: 'question', id: qId });
   };
 
   // Import from default games
@@ -272,6 +385,7 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
       game.questions.forEach((q: any) => {
         if (q.options && q.options.length >= 2) {
           const optTexts = q.options.map((o: any) => o.text);
+          const optImgs = canUseOptionImages ? q.options.map((o: any) => o.imageUrl || '') : [];
           const correctIdx = q.options.findIndex((o: any) => o.isCorrect);
           const letters: ('A' | 'B' | 'C' | 'D')[] = ['A', 'B', 'C', 'D'];
           const correctLetter = letters[correctIdx >= 0 ? correctIdx : 0];
@@ -287,14 +401,13 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
             optionC: optTexts[2] || 'Đáp án C',
             optionD: optTexts[3] || 'Đáp án D',
             options: {
-              A: { text: optTexts[0] || 'Đáp án A' },
-              B: { text: optTexts[1] || 'Đáp án B' },
-              C: { text: optTexts[2] || 'Đáp án C' },
-              D: { text: optTexts[3] || 'Đáp án D' },
+              A: { text: optTexts[0] || 'Đáp án A', ...(optImgs[0] ? { imageUrl: optImgs[0] } : {}) },
+              B: { text: optTexts[1] || 'Đáp án B', ...(optImgs[1] ? { imageUrl: optImgs[1] } : {}) },
+              C: { text: optTexts[2] || 'Đáp án C', ...(optImgs[2] ? { imageUrl: optImgs[2] } : {}) },
+              D: { text: optTexts[3] || 'Đáp án D', ...(optImgs[3] ? { imageUrl: optImgs[3] } : {}) },
             },
             correctAnswer: correctLetter,
-            explanation: q.explanation || '',
-            points: q.points || 10,
+            points: q.points || 1,
             timeLimitSeconds: 20,
             difficulty: 'easy',
           });
@@ -540,7 +653,7 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
                               {q.prompt || q.title}
                             </h4>
                             <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-500">
-                              <span>Điểm: {q.points || 10}đ</span>
+                              <span>Điểm: {q.points || 1}đ</span>
                               <span>•</span>
                               <span>
                                 {q.timeLimitSeconds
@@ -554,9 +667,16 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
                         <div className="flex items-center gap-1">
                           <button
                             type="button"
-                            onClick={() => speakText(q.prompt || q.title)}
+                            onClick={() =>
+                              speakText(q.prompt || q.title, [
+                                { text: q.options?.A?.text || q.optionA || (q.options?.A?.imageUrl ? 'Hình ảnh đáp án A' : '') },
+                                { text: q.options?.B?.text || q.optionB || (q.options?.B?.imageUrl ? 'Hình ảnh đáp án B' : '') },
+                                { text: q.options?.C?.text || q.optionC || (q.options?.C?.imageUrl ? 'Hình ảnh đáp án C' : '') },
+                                { text: q.options?.D?.text || q.optionD || (q.options?.D?.imageUrl ? 'Hình ảnh đáp án D' : '') },
+                              ])
+                            }
                             className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-white"
-                            title="Nghe đọc câu hỏi"
+                            title="Nghe đọc câu hỏi & các đáp án"
                           >
                             🔊
                           </button>
@@ -591,21 +711,22 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
                       )}
 
                       {/* 4 Choices grid */}
-                      <div className="grid grid-cols-2 gap-2 pt-1">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                         {(['A', 'B', 'C', 'D'] as const).map((letter) => {
-                          const optText = q.options?.[letter]?.text || (q as any)[`option${letter}`] || '—';
+                          const optText = q.options?.[letter]?.text || (q as any)[`option${letter}`] || '';
+                          const optImg = q.options?.[letter]?.imageUrl;
                           const isCorrect = q.correctAnswer === letter;
                           return (
                             <div
                               key={letter}
-                              className={`p-2 rounded-xl text-xs flex items-center gap-2 border ${
+                              className={`p-2 rounded-xl text-xs flex items-center gap-2.5 border ${
                                 isCorrect
                                   ? 'bg-emerald-50 border-emerald-400 font-bold text-emerald-900'
                                   : 'bg-white border-slate-200 text-slate-700'
                               }`}
                             >
                               <span
-                                className={`w-5 h-5 rounded-md flex items-center justify-center text-[11px] font-bold ${
+                                className={`w-6 h-6 rounded-md flex items-center justify-center text-[11px] font-bold shrink-0 ${
                                   isCorrect
                                     ? 'bg-emerald-600 text-white'
                                     : 'bg-slate-200 text-slate-700'
@@ -613,9 +734,20 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
                               >
                                 {letter}
                               </span>
-                              <span className="truncate">{optText}</span>
+                              {optImg && (
+                                <div className="w-11 h-11 rounded-lg overflow-hidden border border-slate-200 bg-white shrink-0">
+                                  <img
+                                    src={optImg}
+                                    alt={`Ảnh đáp án ${letter}`}
+                                    className="w-full h-full object-cover"
+                                  />
+                                </div>
+                              )}
+                              <span className="truncate flex-1">
+                                {optText || (optImg ? `Hình ảnh ${letter}` : '—')}
+                              </span>
                               {isCorrect && (
-                                <span className="ml-auto text-[10px] text-emerald-700 font-semibold uppercase">
+                                <span className="ml-auto text-[10px] text-emerald-700 font-semibold uppercase shrink-0">
                                   ✓ Đúng
                                 </span>
                               )}
@@ -623,13 +755,6 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
                           );
                         })}
                       </div>
-
-                      {/* Explanation note */}
-                      {q.explanation && (
-                        <p className="text-[11px] text-slate-500 bg-white p-2 rounded-xl border border-slate-100 italic">
-                          💡 <strong>Lời cô:</strong> {q.explanation}
-                        </p>
-                      )}
                     </div>
                   ))}
                 </div>
@@ -823,11 +948,18 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
                   />
                   <button
                     type="button"
-                    onClick={() => speakText(questionFormData.prompt)}
+                    onClick={() =>
+                      speakText(questionFormData.prompt, [
+                        { text: questionFormData.optionA || (questionFormData.optionAImage ? 'Hình ảnh đáp án A' : '') },
+                        { text: questionFormData.optionB || (questionFormData.optionBImage ? 'Hình ảnh đáp án B' : '') },
+                        { text: questionFormData.optionC || (questionFormData.optionCImage ? 'Hình ảnh đáp án C' : '') },
+                        { text: questionFormData.optionD || (questionFormData.optionDImage ? 'Hình ảnh đáp án D' : '') },
+                      ])
+                    }
                     className="absolute bottom-2 right-2 p-1 text-slate-400 hover:text-indigo-600 text-xs font-medium"
-                    title="Thử giọng đọc"
+                    title="Thử giọng đọc câu hỏi & các đáp án"
                   >
-                    🔊 Đọc thử
+                    🔊 Đọc thử câu hỏi & đáp án
                   </button>
                 </div>
               </div>
@@ -888,9 +1020,26 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
 
               {/* 4 Choices A, B, C, D */}
               <div className="space-y-2">
-                <label className="block text-xs font-semibold text-slate-700">
-                  4 phương án tương ứng 4 góc xoay:
-                </label>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    4 phương án tương ứng 4 góc xoay:
+                  </label>
+                  {canUseOptionImages ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-[10px] font-bold text-amber-700">
+                      <Crown className="w-3 h-3 text-amber-500" />
+                      <span>VIP Premium: Đã mở khóa ảnh đáp án</span>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setIsPremiumUpgradeModalOpen(true)}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 hover:bg-amber-100 border border-amber-200 text-[10px] font-bold text-amber-700 transition cursor-pointer"
+                    >
+                      <Crown className="w-3 h-3 text-amber-500" />
+                      <span>Thêm ảnh đáp án: Chỉ dành cho Premium</span>
+                    </button>
+                  )}
+                </div>
 
                 {(['A', 'B', 'C', 'D'] as const).map((letter) => {
                   const key = `option${letter}` as
@@ -898,61 +1047,160 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
                     | 'optionB'
                     | 'optionC'
                     | 'optionD';
+                  const imgKey = `option${letter}Image` as
+                    | 'optionAImage'
+                    | 'optionBImage'
+                    | 'optionCImage'
+                    | 'optionDImage';
                   const isCorrect = questionFormData.correctAnswer === letter;
+                  const optionImg = questionFormData[imgKey];
+                  const showExistingLockedImg = !canUseOptionImages && Boolean(editingQuestion?.options?.[letter]?.imageUrl);
+                  const previewImg = canUseOptionImages ? optionImg : editingQuestion?.options?.[letter]?.imageUrl;
+
                   return (
                     <div
                       key={letter}
-                      className={`flex items-center gap-2 p-2 rounded-xl border ${
+                      className={`p-2.5 rounded-xl border space-y-2 ${
                         isCorrect
                           ? 'border-emerald-400 bg-emerald-50/60'
                           : 'border-slate-200 bg-white'
                       }`}
                     >
-                      <label className="flex items-center gap-1.5 cursor-pointer">
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-1.5 cursor-pointer shrink-0">
+                          <input
+                            type="radio"
+                            name="correctAnswerRadio"
+                            checked={isCorrect}
+                            onChange={() =>
+                              setQuestionFormData((p) => ({
+                                ...p,
+                                correctAnswer: letter,
+                              }))
+                            }
+                            className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
+                          />
+                          <span
+                            className={`w-6 h-6 rounded-md flex items-center justify-center font-bold text-xs ${
+                              isCorrect
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-slate-200 text-slate-700'
+                            }`}
+                          >
+                            {letter}
+                          </span>
+                        </label>
                         <input
-                          type="radio"
-                          name="correctAnswerRadio"
-                          checked={isCorrect}
-                          onChange={() =>
+                          type="text"
+                          required={!canUseOptionImages || !optionImg}
+                          value={questionFormData[key]}
+                          onChange={(e) => {
+                            setQuestionFormError(null);
                             setQuestionFormData((p) => ({
                               ...p,
-                              correctAnswer: letter,
-                            }))
+                              [key]: e.target.value,
+                            }));
+                          }}
+                          placeholder={
+                            canUseOptionImages
+                              ? `Nội dung đáp án ${letter} (tùy chọn nếu có ảnh)...`
+                              : `Nội dung đáp án ${letter}...`
                           }
-                          className="w-4 h-4 text-emerald-600 focus:ring-emerald-500"
+                          className="flex-1 min-w-0 px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400 bg-white"
                         />
-                        <span
-                          className={`w-6 h-6 rounded-md flex items-center justify-center font-bold text-xs ${
-                            isCorrect
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-slate-200 text-slate-700'
-                          }`}
-                        >
-                          {letter}
-                        </span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={questionFormData[key]}
-                        onChange={(e) =>
-                          setQuestionFormData((p) => ({
-                            ...p,
-                            [key]: e.target.value,
-                          }))
-                        }
-                        placeholder={`Nội dung đáp án ${letter}...`}
-                        className="flex-1 px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                      />
-                      {isCorrect && (
-                        <span className="text-[10px] text-emerald-700 font-bold px-1.5">
-                          Đáp án đúng
-                        </span>
+
+                        {/* Hidden file input for Premium option image */}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          ref={(el) => {
+                            optionImageInputRefs.current[letter] = el;
+                          }}
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            handleUploadOptionImage(letter, f);
+                            e.target.value = '';
+                          }}
+                        />
+
+                        {canUseOptionImages ? (
+                          <button
+                            type="button"
+                            onClick={() => optionImageInputRefs.current[letter]?.click()}
+                            className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[11px] font-bold flex items-center gap-1 shrink-0 transition cursor-pointer"
+                            title={`Tải ảnh minh họa cho đáp án ${letter}`}
+                          >
+                            <ImagePlus className="w-3.5 h-3.5" />
+                            <span>{optionImg ? 'Đổi ảnh' : 'Thêm ảnh'}</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setIsPremiumUpgradeModalOpen(true)}
+                            className="px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-[11px] font-bold flex items-center gap-1 shrink-0 transition cursor-pointer"
+                            title="Tính năng chỉ dành cho thành viên VIP Premium"
+                          >
+                            <Lock className="w-3 h-3" />
+                            <span>Ảnh VIP</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Option image preview + remove / correct badge */}
+                      {(previewImg || isCorrect) && (
+                        <div className="flex items-center justify-between gap-2 pl-7">
+                          {previewImg ? (
+                            <div className="flex items-center gap-2">
+                              <div className="w-12 h-12 rounded-lg overflow-hidden border border-slate-200 bg-white shrink-0">
+                                <img
+                                  src={previewImg}
+                                  alt={`Xem trước đáp án ${letter}`}
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                              {canUseOptionImages && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setQuestionFormData((p) => ({
+                                      ...p,
+                                      [imgKey]: '',
+                                    }))
+                                  }
+                                  className="inline-flex items-center gap-1 text-[11px] text-rose-600 hover:text-rose-700 font-semibold cursor-pointer"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                  <span>Xóa ảnh</span>
+                                </button>
+                              )}
+                              {showExistingLockedImg && (
+                                <span className="text-[10px] text-amber-700 font-medium">
+                                  (Ảnh sẵn có — Cần Premium để chỉnh sửa)
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span />
+                          )}
+                          {isCorrect && (
+                            <span className="text-[10px] text-emerald-700 font-bold px-1.5 shrink-0">
+                              ✓ Đáp án đúng
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
                   );
                 })}
               </div>
+
+              {questionFormError && (
+                <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{questionFormError}</span>
+                </div>
+              )}
 
               {/* Additional settings */}
               <div className="grid grid-cols-2 gap-3 pt-1">
@@ -968,7 +1216,7 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
                     onChange={(e) =>
                       setQuestionFormData((p) => ({
                         ...p,
-                        points: parseInt(e.target.value) || 10,
+                        points: parseInt(e.target.value) || 1,
                       }))
                     }
                     className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:outline-none"
@@ -993,24 +1241,6 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
                     className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:outline-none"
                   />
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Lời dặn / Giải thích khi mở kết quả
-                </label>
-                <input
-                  type="text"
-                  value={questionFormData.explanation}
-                  onChange={(e) =>
-                    setQuestionFormData((p) => ({
-                      ...p,
-                      explanation: e.target.value,
-                    }))
-                  }
-                  placeholder="Ví dụ: Đúng rồi, quả táo có màu đỏ và vị ngọt mát!"
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-400 focus:outline-none"
-                />
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
@@ -1085,6 +1315,80 @@ export const QRQuestionBank: React.FC<QRQuestionBankProps> = ({ onSelectPackToPl
                 Đóng
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      <Modal
+        isOpen={Boolean(pendingDelete)}
+        title={pendingDelete?.type === 'pack' ? 'Xóa bộ câu hỏi QR?' : 'Xóa câu hỏi?'}
+        message={
+          pendingDelete?.type === 'pack'
+            ? 'Cô có chắc chắn muốn xóa bộ đề QR này không?'
+            : 'Cô có chắc chắn muốn xóa câu hỏi này khỏi bộ đề không?'
+        }
+        confirmText="Xóa"
+        cancelText="Hủy"
+        confirmVariant="danger"
+        onConfirm={() => {
+          if (!pendingDelete) return;
+          if (pendingDelete.type === 'pack') {
+            deleteQRQuestionPack(pendingDelete.id);
+            refreshPacks();
+          } else if (activePack) {
+            const updatedQuestions = activePack.questions.filter((q) => q.id !== pendingDelete.id);
+            saveQRQuestionPack({ ...activePack, questions: updatedQuestions });
+            refreshPacks();
+          }
+          setPendingDelete(null);
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
+
+      {/* Premium Feature Gating Modal */}
+      {isPremiumUpgradeModalOpen && (
+        <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-amber-200 relative text-center">
+            <button
+              type="button"
+              onClick={() => setIsPremiumUpgradeModalOpen(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 p-1.5 rounded-full hover:bg-slate-100 transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="w-16 h-16 rounded-3xl bg-amber-100 text-amber-600 mx-auto flex items-center justify-center mb-4 shadow-inner">
+              <Crown className="w-8 h-8" />
+            </div>
+
+            <h3 className="text-lg font-black text-slate-800 mb-2">
+              Tính năng dành riêng cho VIP Premium
+            </h3>
+
+            <p className="text-xs sm:text-sm text-slate-600 mb-5 leading-relaxed">
+              Chức năng <strong className="text-indigo-700">thêm hình ảnh minh họa cho từng đáp án A, B, C, D</strong> trong trò chơi thẻ QR giấy chỉ mở khóa cho tài khoản{' '}
+              <span className="font-bold text-amber-600">Giáo viên (Premium)</span>.
+              <br />
+              Hãy đăng nhập tài khoản VIP hoặc liên hệ quản trị viên để nâng cấp nhé!
+            </p>
+
+            <div className="bg-amber-50 rounded-2xl p-3.5 mb-5 border border-amber-200 text-xs text-amber-900 text-left flex items-start gap-2.5">
+              <Crown className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">Đặc quyền Giáo viên Premium (VIP):</p>
+                <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                  Thêm hình ảnh trực quan cho cả 4 đáp án A-B-C-D trong Game Thẻ QR • Không giới hạn câu hỏi/bộ • Không giới hạn phòng chơi • Báo cáo phân tích chi tiết
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsPremiumUpgradeModalOpen(false)}
+              className="w-full py-3 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs sm:text-sm shadow-sm transition cursor-pointer"
+            >
+              Đã hiểu
+            </button>
           </div>
         </div>
       )}

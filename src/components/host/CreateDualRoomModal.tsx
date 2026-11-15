@@ -15,30 +15,43 @@ import {
   BookOpen,
   Search,
   Check,
-  Play
+  Play,
+  Plus
 } from 'lucide-react';
 
 interface CreateDualRoomModalProps {
   isOpen: boolean;
   onClose: () => void;
   onConfirmDualRoom: (gameA: Game, gameB: Game) => void;
+  onCreateNewGame?: () => void;
 }
 
 export const CreateDualRoomModal: React.FC<CreateDualRoomModalProps> = ({
   isOpen,
   onClose,
   onConfirmDualRoom,
+  onCreateNewGame,
 }) => {
   const { currentUser, isAdmin } = useAuth();
   const allGames = useMemo(() => {
     return getAllGames().filter((g) => isGameVisibleToUser(g, currentUser, isAdmin));
-  }, [currentUser, isAdmin]);
+  }, [currentUser, isAdmin, isOpen]);
 
   const [selectedGameA, setSelectedGameA] = useState<Game>(() => allGames[0] || DEFAULT_GAMES[0]);
   const [selectedGameB, setSelectedGameB] = useState<Game>(() => allGames[1] || DEFAULT_GAMES[1] || allGames[0]);
   const [activeSlot, setActiveSlot] = useState<'A' | 'B'>('A');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+
+  React.useEffect(() => {
+    if (!isOpen || allGames.length === 0) return;
+    if (!allGames.some((g) => g.id === selectedGameA.id)) {
+      setSelectedGameA(allGames[0]);
+    }
+    if (!allGames.some((g) => g.id === selectedGameB.id)) {
+      setSelectedGameB(allGames[1] || allGames[0]);
+    }
+  }, [isOpen, allGames, selectedGameA.id, selectedGameB.id]);
 
   if (!isOpen) return null;
 
@@ -275,6 +288,21 @@ export const CreateDualRoomModal: React.FC<CreateDualRoomModalProps> = ({
                 className="w-full pl-8 pr-3 py-1.5 text-xs font-bold text-slate-800 bg-slate-100 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
               />
             </div>
+            {onCreateNewGame && (
+              <button
+                type="button"
+                onClick={() => {
+                  sounds.playClick();
+                  onCreateNewGame();
+                }}
+                className="px-3 py-1.5 rounded-xl bg-[#16865D] hover:bg-[#126b4a] text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shrink-0 shadow-2xs"
+                title="Tạo bộ câu hỏi mới"
+              >
+                <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span className="hidden sm:inline">Tạo bộ đề mới</span>
+                <span className="sm:hidden">Tạo mới</span>
+              </button>
+            )}
           </div>
         </div>
 

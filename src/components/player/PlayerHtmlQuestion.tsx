@@ -58,15 +58,8 @@ export const PlayerHtmlQuestion: React.FC<PlayerHtmlQuestionProps> = ({
 
   const hasSubmittedRef = useRef(hasSubmitted);
   hasSubmittedRef.current = hasSubmitted;
-
-  // Auto submit progress on unmount if not submitted
-  useEffect(() => {
-    return () => {
-      if (!hasSubmittedRef.current) {
-        handleSubmitCurrentProgress();
-      }
-    };
-  }, []);
+  const onSubmitResultRef = useRef(onSubmitResult);
+  onSubmitResultRef.current = onSubmitResult;
 
   const handleFinish = (
     isCorrect: boolean = true,
@@ -74,14 +67,15 @@ export const PlayerHtmlQuestion: React.FC<PlayerHtmlQuestionProps> = ({
     summary?: string,
     extraDetails?: Partial<HtmlGameResultPayload>
   ) => {
-    if (hasSubmitted) return;
+    if (hasSubmittedRef.current) return;
+    hasSubmittedRef.current = true;
     setHasSubmitted(true);
     if (points > 0 || isCorrect) {
       sounds.playFanfare();
     } else {
       sounds.playClick();
     }
-    onSubmitResult({
+    onSubmitResultRef.current({
       isCorrect,
       points,
       score: points,
@@ -91,7 +85,7 @@ export const PlayerHtmlQuestion: React.FC<PlayerHtmlQuestionProps> = ({
   };
 
   const handleSubmitCurrentProgress = () => {
-    if (hasSubmitted) return;
+    if (hasSubmittedRef.current) return;
 
     // 1. Try reading directly from iframe if bridge exposed on window
     let liveStats: any = null;
@@ -106,7 +100,7 @@ export const PlayerHtmlQuestion: React.FC<PlayerHtmlQuestionProps> = ({
     if (source) {
       const totalCorrect = source.totalCorrect !== undefined ? Number(source.totalCorrect) : undefined;
       const totalQuestions = source.totalQuestions !== undefined ? Number(source.totalQuestions) : undefined;
-      const maxQPoints = question.points || 30;
+      const maxQPoints = question.points || 1;
 
       let score = 0;
       if (source.score !== undefined && typeof source.score === 'number' && !isNaN(source.score)) {
@@ -145,12 +139,25 @@ export const PlayerHtmlQuestion: React.FC<PlayerHtmlQuestionProps> = ({
     });
   };
 
+  const handleSubmitCurrentProgressRef = useRef(handleSubmitCurrentProgress);
+  handleSubmitCurrentProgressRef.current = handleSubmitCurrentProgress;
 
+  // Auto submit progress on unmount if not submitted
+  useEffect(() => {
+    return () => {
+      if (!hasSubmittedRef.current) {
+        handleSubmitCurrentProgressRef.current();
+      }
+    };
+  }, []);
 
   // Listen to postMessage from the embedded HTML game
   useEffect(() => {
     const handleGameMessage = (event: MessageEvent) => {
       if (!event.data || typeof event.data !== 'object') return;
+      if (iframeRef.current?.contentWindow && event.source && event.source !== iframeRef.current.contentWindow) {
+        return;
+      }
 
       const data = event.data;
 
@@ -168,7 +175,7 @@ export const PlayerHtmlQuestion: React.FC<PlayerHtmlQuestionProps> = ({
 
       // Handle final game completion
       if (data.type === 'GAME_COMPLETE' || data.type === 'GAME_FINISH') {
-        if (hasSubmitted) return;
+        if (hasSubmittedRef.current) return;
         latestResultRef.current = data;
 
         // Try reading rich stats directly from iframe window if message lacked details
@@ -183,7 +190,7 @@ export const PlayerHtmlQuestion: React.FC<PlayerHtmlQuestionProps> = ({
         const mergedSource = { ...(liveStats || {}), ...data };
         const totalCorrect = mergedSource.totalCorrect !== undefined ? Number(mergedSource.totalCorrect) : (mergedSource.correct !== undefined ? Number(mergedSource.correct) : undefined);
         const totalQuestions = mergedSource.totalQuestions !== undefined ? Number(mergedSource.totalQuestions) : (mergedSource.total !== undefined ? Number(mergedSource.total) : undefined);
-        const maxQPoints = question.points || 30;
+        const maxQPoints = question.points || 1;
 
         let awardedPoints = 0;
         if (mergedSource.score !== undefined && typeof mergedSource.score === 'number' && !isNaN(mergedSource.score)) {
@@ -224,7 +231,7 @@ export const PlayerHtmlQuestion: React.FC<PlayerHtmlQuestionProps> = ({
 
     window.addEventListener('message', handleGameMessage);
     return () => window.removeEventListener('message', handleGameMessage);
-  }, [hasSubmitted, question.points]);
+  }, [question.points]);
 
   const handleReloadIframe = () => {
     setRuntimeError(null);

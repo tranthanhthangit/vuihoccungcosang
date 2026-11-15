@@ -24,7 +24,7 @@ import {
   PenTool,
 } from 'lucide-react';
 import { sounds } from '../../utils/sound';
-import { speakQuestionWithOptions, stopSpeaking, isSpeechSupported, subscribeSpeakingState } from '../../utils/speechVoice';
+import { speakQuestionWithOptions, speakOption, stopSpeaking, isSpeechSupported, subscribeSpeakingState, unlockSpeechAudio } from '../../utils/speechVoice';
 import { OPEN_ENDED_PRESET_TEMPLATES } from '../../data/openEndedTemplates';
 
 interface QuestionQuizEditorProps {
@@ -59,6 +59,7 @@ export const QuestionQuizEditor: React.FC<QuestionQuizEditorProps> = ({
 
   const handleToggleVoice = () => {
     sounds.playClick();
+    unlockSpeechAudio();
     if (isSpeaking) {
       stopSpeaking();
     } else {
@@ -361,14 +362,15 @@ export const QuestionQuizEditor: React.FC<QuestionQuizEditorProps> = ({
                     <span>Điểm thưởng</span>
                   </label>
                   <select
-                    value={question.points || 20}
+                    value={question.points || 1}
                     onChange={(e) => handlePointsChange(Number(e.target.value))}
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 font-bold text-slate-800 outline-none"
                   >
+                    <option value={1}>1 điểm (Mặc định)</option>
+                    <option value={2}>2 điểm</option>
+                    <option value={3}>3 điểm</option>
+                    <option value={5}>5 điểm</option>
                     <option value={10}>10 điểm</option>
-                    <option value={20}>20 điểm</option>
-                    <option value={30}>30 điểm</option>
-                    <option value={50}>50 điểm</option>
                   </select>
                 </div>
               </div>
@@ -630,15 +632,15 @@ export const QuestionQuizEditor: React.FC<QuestionQuizEditorProps> = ({
                   <span>Điểm thưởng</span>
                 </label>
                 <select
-                  value={question.points || 10}
+                  value={question.points || 1}
                   onChange={(e) => handlePointsChange(Number(e.target.value))}
                   className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 font-bold text-slate-800 outline-none"
                 >
+                  <option value={1}>1 điểm (Mặc định)</option>
+                  <option value={2}>2 điểm</option>
+                  <option value={3}>3 điểm</option>
                   <option value={5}>5 điểm</option>
                   <option value={10}>10 điểm</option>
-                  <option value={15}>15 điểm</option>
-                  <option value={20}>20 điểm</option>
-                  <option value={30}>30 điểm</option>
                 </select>
               </div>
             </div>
@@ -964,6 +966,19 @@ export const QuestionQuizEditor: React.FC<QuestionQuizEditorProps> = ({
                   </div>
 
                   <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sounds.playClick();
+                        unlockSpeechAudio();
+                        speakOption(optLetters[idx] || `${idx + 1}`, opt.text);
+                      }}
+                      className="p-1 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition cursor-pointer"
+                      title={`Nghe thử giọng đọc: Đáp án ${optLetters[idx] || idx + 1}`}
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => handleSetCorrectOption(opt.id)}

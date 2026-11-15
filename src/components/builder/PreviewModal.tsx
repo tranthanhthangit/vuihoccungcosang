@@ -519,7 +519,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
                   </span>
                   <span className="px-2.5 py-1 rounded-xl bg-amber-50 text-amber-700 font-bold text-xs flex items-center gap-1 border border-amber-200">
                     <Award className="w-3.5 h-3.5 text-amber-500" />
-                    <span>+{question.points || 10}đ</span>
+                    <span>+{question.points || 1}đ</span>
                   </span>
                 </div>
                 {allQuestions && allQuestions.length > 1 && onSelectQuestionIndex && (
@@ -573,7 +573,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
                   </span>
                   <span className="px-2.5 py-1 rounded-xl bg-purple-50 text-purple-700 font-bold text-xs flex items-center gap-1 border border-purple-200">
                     <Award className="w-3.5 h-3.5 text-purple-600" />
-                    <span>+{question.points || 10}đ</span>
+                    <span>+{question.points || 1}đ</span>
                   </span>
                 </div>
 
@@ -649,7 +649,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
               {/* Teacher grading notice */}
               <div className="p-3 rounded-xl bg-purple-50 border border-purple-200 text-xs text-purple-900 font-bold flex items-center justify-between">
                 <span>✏️ Cô có thể xem bài làm & sửa bài trực tiếp tại màn hình kết quả và tổng kết</span>
-                <span className="font-mono text-purple-700">+{question.points || 10}đ</span>
+                <span className="font-mono text-purple-700">+{question.points || 1}đ</span>
               </div>
             </div>
           ) : (
@@ -667,7 +667,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
                   </span>
                   <span className="px-2.5 py-1 rounded-xl bg-amber-50 text-amber-700 font-bold text-xs flex items-center gap-1 border border-amber-200">
                     <Award className="w-3.5 h-3.5 text-amber-500" />
-                    <span>+{question.points || 10}đ</span>
+                    <span>+{question.points || 1}đ</span>
                   </span>
                 </div>
 

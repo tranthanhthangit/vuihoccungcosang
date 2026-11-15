@@ -494,12 +494,76 @@ function playViaHtmlAudio(
 }
 
 /**
- * Reads a question aloud: ONLY reads the question prompt, skipping answer options
- * (Theo yêu cầu: "đối với câu hỏi có đọc đáp án: bỏ đọc đáp án, chỉ đọc câu hỏi.")
+ * Builds the complete spoken text in natural Vietnamese including question and all answer options
  */
-export function speakQuestionWithOptions(
+export function buildQuestionAndOptionsSpeechText(
   questionTitle: string,
-  _options?: { text: string }[],
+  options?: Array<{ text?: string } | string> | Record<string, { text?: string } | string>
+): string {
+  const cleanTitle = (questionTitle || '').trim();
+  const parts: string[] = [];
+
+  if (cleanTitle) {
+    parts.push(cleanTitle);
+  }
+
+  const optionLabels = ['A', 'B', 'C', 'D', 'E', 'F'];
+
+  if (Array.isArray(options) && options.length > 0) {
+    options.forEach((opt, idx) => {
+      const rawText = typeof opt === 'string' ? opt : (opt?.text || '');
+      let cleanOptText = (rawText || '').trim();
+      // Remove leading prefix if already present like "A.", "A:", "Đáp án A:", "A - "
+      cleanOptText = cleanOptText.replace(/^(?:đáp\s+án\s+)?([A-Fa-f0-9])[\s.:\-–—)]+\s*/i, '').trim();
+
+      const label = optionLabels[idx] || `${idx + 1}`;
+      if (cleanOptText) {
+        parts.push(`Đáp án ${label}: ${cleanOptText}.`);
+      } else {
+        parts.push(`Đáp án ${label}.`);
+      }
+    });
+  } else if (options && typeof options === 'object') {
+    ['A', 'B', 'C', 'D'].forEach((key) => {
+      const val = (options as any)[key];
+      if (val !== undefined && val !== null) {
+        const rawText = typeof val === 'string' ? val : (val?.text || '');
+        let cleanOptText = (rawText || '').trim();
+        cleanOptText = cleanOptText.replace(/^(?:đáp\s+án\s+)?([A-Fa-f0-9])[\s.:\-–—)]+\s*/i, '').trim();
+        if (cleanOptText) {
+          parts.push(`Đáp án ${key}: ${cleanOptText}.`);
+        } else {
+          parts.push(`Đáp án ${key}.`);
+        }
+      }
+    });
+  }
+
+  return parts.join(' ');
+}
+
+/**
+ * Reads a single option aloud in Vietnamese (e.g. "Đáp án A: Con cá heo.")
+ */
+export function speakOption(
+  letter: string,
+  optionText?: string,
+  callbacks?: {
+    onStart?: () => void;
+    onEnd?: () => void;
+  }
+): boolean {
+  let cleanOptText = (optionText || '').trim();
+  cleanOptText = cleanOptText.replace(/^(?:đáp\s+án\s+)?([A-Fa-f0-9])[\s.:\-–—)]+\s*/i, '').trim();
+  const spokenText = cleanOptText ? `Đáp án ${letter}: ${cleanOptText}.` : `Đáp án ${letter}.`;
+  return speakVietnamese(spokenText, callbacks);
+}
+
+/**
+ * Reads a question prompt only (without answer options)
+ */
+export function speakQuestionPromptOnly(
+  questionTitle: string,
   callbacks?: {
     onStart?: () => void;
     onEnd?: () => void;
@@ -507,9 +571,23 @@ export function speakQuestionWithOptions(
 ): boolean {
   const cleanTitle = (questionTitle || '').trim();
   if (!cleanTitle) return false;
-
-  // Chỉ đọc nội dung câu hỏi, bỏ toàn bộ phần đọc các đáp án
   return speakVietnamese(cleanTitle, callbacks);
+}
+
+/**
+ * Reads a question aloud along with its answer options (A, B, C, D) in Vietnamese
+ */
+export function speakQuestionWithOptions(
+  questionTitle: string,
+  options?: Array<{ text?: string } | string> | Record<string, { text?: string } | string>,
+  callbacks?: {
+    onStart?: () => void;
+    onEnd?: () => void;
+  }
+): boolean {
+  const fullText = buildQuestionAndOptionsSpeechText(questionTitle, options);
+  if (!fullText) return false;
+  return speakVietnamese(fullText, callbacks);
 }
 
 export function speakText(text: string, onEnd?: () => void): boolean {

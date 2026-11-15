@@ -92,7 +92,7 @@ const createDefaultWordQuestion = (index: number): Question => {
     explanation: sample.explanation,
     timeLimit: 0,
     noTimeLimit: true,
-    points: 10,
+    points: 1,
     readQuestionAudio: true,
     options: [
       { id: 'opt_correct', text: sample.missingLetters[0], isCorrect: true },
@@ -147,6 +147,7 @@ export const WordDragGameBuilder: React.FC<WordDragGameBuilderProps> = ({
 
   // Custom distractor input
   const [newDistractorInput, setNewDistractorInput] = useState('');
+  const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
   // Update current question
   const updateCurrentQuestion = (updates: Partial<Question>) => {
@@ -206,9 +207,11 @@ export const WordDragGameBuilder: React.FC<WordDragGameBuilderProps> = ({
   // Delete question
   const handleDeleteQuestion = () => {
     if (questions.length <= 1) {
-      alert('Trò chơi cần ít nhất 1 câu hỏi kéo thả ô chữ!');
+      setErrorBanner('Trò chơi cần ít nhất 1 câu hỏi kéo thả ô chữ!');
+      sounds.playWrong();
       return;
     }
+    setErrorBanner(null);
     sounds.playClick();
     setQuestions((prev) => prev.filter((_, idx) => idx !== currentQIndex));
     setCurrentQIndex((prev) => Math.max(0, prev - 1));
@@ -413,6 +416,19 @@ export const WordDragGameBuilder: React.FC<WordDragGameBuilderProps> = ({
           </button>
         </div>
       </div>
+
+      {errorBanner && (
+        <div className="bg-rose-50 border-b border-rose-200 px-4 py-2 flex items-center justify-between text-xs font-bold text-rose-700 shrink-0">
+          <span>⚠️ {errorBanner}</span>
+          <button
+            type="button"
+            onClick={() => setErrorBanner(null)}
+            className="text-rose-500 hover:text-rose-800 px-2 py-0.5 rounded"
+          >
+            Đóng
+          </button>
+        </div>
+      )}
 
       {/* Main Workspace Layout: Questions Sidebar + Question Editor */}
       <div className="flex-1 flex min-h-0 overflow-hidden">

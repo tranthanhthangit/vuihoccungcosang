@@ -720,7 +720,7 @@ export function createHtmlGameQuestion(
   title: string,
   htmlContent: string,
   timeLimit: number = 45,
-  points: number = 30,
+  points: number = 1,
   explanation: string = 'Bé đã hoàn thành trò chơi tương tác xuất sắc!'
 ): Question {
   return {

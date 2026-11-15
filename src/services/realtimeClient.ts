@@ -66,14 +66,49 @@ export class RealtimeClient {
 
   private initNetworkListeners() {
     if (typeof window !== 'undefined') {
-      window.addEventListener('online', () => {
+      const handleWakeOrOnline = () => {
         if (this.shouldConnectLocalWs()) {
           this.connect();
         } else if (isSupabaseConfigured()) {
           this.isConnected = true;
           this.emit('connection_change', { status: 'connected', online: true });
         }
-      });
+
+        if (this.currentRoomCode && this.currentRole) {
+          if (this.currentRole === 'player' && this.currentTeamId) {
+            this.send({
+              type: 'player:heartbeat',
+              roomCode: this.currentRoomCode,
+              teamId: this.currentTeamId,
+              deviceId: this.currentDeviceId,
+            });
+          } else if (this.currentRole === 'host') {
+            this.send({
+              type: 'host:heartbeat',
+              roomCode: this.currentRoomCode,
+            });
+          }
+          this.send({
+            type: 'sync_request',
+            roomCode: this.currentRoomCode,
+            role: this.currentRole,
+            teamId: this.currentTeamId,
+            deviceId: this.currentDeviceId,
+          });
+        }
+      };
+
+      window.addEventListener('online', handleWakeOrOnline);
+      window.addEventListener('focus', handleWakeOrOnline);
+      window.addEventListener('pageshow', handleWakeOrOnline);
+
+      if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') {
+            handleWakeOrOnline();
+          }
+        });
+      }
 
       window.addEventListener('offline', () => {
         this.isConnected = false;
@@ -135,9 +170,11 @@ export class RealtimeClient {
           if (payload.type === 'session_created' && payload.data?.session?.roomCode) {
             this.currentRoomCode = payload.data.session.roomCode.toUpperCase();
             this.currentRole = 'host';
+            this.startHeartbeat();
           }
           if (payload.type === 'session_updated' && payload.data?.session?.roomCode && this.currentRole === 'host') {
             this.currentRoomCode = payload.data.session.roomCode.toUpperCase();
+            this.startHeartbeat();
           }
 
           if (payload.type) {
@@ -407,21 +444,21 @@ export class RealtimeClient {
         if (question.type === 'multiple_choice' || question.type === 'true_false' || question.type === 'letter_recognition' || question.type === 'counting') {
           const opt = question.options?.find(o => o.id === answerId);
           isCorrect = Boolean(opt?.isCorrect);
-          pointsAwarded = isCorrect ? (question.points || 10) : 0;
+          pointsAwarded = isCorrect ? (question.points || 1) : 0;
           effectiveAnswerText = opt?.text || answerId || '';
         } else if (question.type === 'word_choice' && answerIds) {
           const correctIds = question.options?.filter(o => o.isCorrect).map(o => o.id) || [];
           isCorrect = correctIds.length === answerIds.length && correctIds.every(id => answerIds.includes(id));
-          pointsAwarded = isCorrect ? (question.points || 10) : 0;
+          pointsAwarded = isCorrect ? (question.points || 1) : 0;
           effectiveAnswerText = answerIds.join(', ');
         } else if (question.type === 'word_drag_drop' && chosenLetter) {
           isCorrect = Boolean(chosenLetter && question.title?.toLowerCase().includes(chosenLetter.toLowerCase()));
-          pointsAwarded = isCorrect ? (question.points || 10) : 0;
+          pointsAwarded = isCorrect ? (question.points || 1) : 0;
           effectiveAnswerText = `Bé ghép chữ "${chosenLetter}"`;
         } else if (htmlGameResult) {
-          const maxPoints = question.points || 30;
+          const maxPoints = question.points || 1;
           if (htmlGameResult.score !== undefined) {
-            pointsAwarded = Math.round(htmlGameResult.score);
+            pointsAwarded = Math.min(maxPoints, Math.round(htmlGameResult.score));
             isCorrect = Boolean(htmlGameResult.isCorrect ?? (pointsAwarded > 0));
           } else {
             isCorrect = Boolean(htmlGameResult.isCorrect);
@@ -439,7 +476,7 @@ export class RealtimeClient {
             : (drawing ? 'Bé đã vẽ tranh câu trả lời 🎨' : 'Đã nộp bài tự luận');
         } else {
           isCorrect = true;
-          pointsAwarded = question.points || 10;
+          pointsAwarded = question.points || 1;
         }
       }
 
@@ -475,7 +512,7 @@ export class RealtimeClient {
           drawingDataUrl: effectiveDrawing,
           hasDrawn: Boolean(effectiveDrawing && effectiveDrawing.length > 20),
           teacherGrade: prevAns?.openEnded?.teacherGrade || openEnded?.teacherGrade || 'pending',
-          teacherPoints: prevAns?.openEnded?.teacherPoints ?? (question?.points || 10),
+          teacherPoints: prevAns?.openEnded?.teacherPoints ?? (question?.points || 1),
           teacherFeedback: prevAns?.openEnded?.teacherFeedback || '',
           gradedAt: Date.now(),
         } : undefined,
@@ -859,8 +896,13 @@ export class RealtimeClient {
           teamId: this.currentTeamId,
           deviceId: this.currentDeviceId,
         });
+      } else if (this.currentRole === 'host' && this.currentRoomCode) {
+        this.send({
+          type: 'host:heartbeat',
+          roomCode: this.currentRoomCode,
+        });
       }
-    }, 3000);
+    }, 3500);
   }
 
   public stopHeartbeat() {
@@ -970,6 +1012,7 @@ export class RealtimeClient {
       type: 'host:register',
       roomCode: this.currentRoomCode,
     });
+    this.startHeartbeat();
 
     if (this.serverlessSession) {
       setTimeout(() => {
@@ -1081,7 +1124,12 @@ export class RealtimeClient {
       Object.keys(this.serverlessSession.teams).forEach(teamId => {
         if (!this.serverlessSession!.answers[qIdx][teamId]) {
           const team = this.serverlessSession!.teams[teamId];
-          const question = this.serverlessSession!.game.questions[qIdx];
+          const assignedSet = this.serverlessSession!.isDualMode
+            ? (this.serverlessSession!.teamAssignments?.[teamId] || team?.assignedSet || 'A')
+            : 'A';
+          const question = (this.serverlessSession!.isDualMode && assignedSet === 'B' && this.serverlessSession!.gameB)
+            ? this.serverlessSession!.gameB.questions[qIdx]
+            : this.serverlessSession!.game.questions[qIdx];
           const draft = this.serverlessSession!.drafts?.[qIdx]?.[teamId] ||
             this.serverlessSession!.drafts?.[String(qIdx)]?.[teamId] ||
             this.serverlessSession!.drafts?.[qIdx]?.[teamId.toLowerCase()] ||
@@ -1114,7 +1162,7 @@ export class RealtimeClient {
                 drawingDataUrl: drawing,
                 hasDrawn: Boolean(hasWork),
                 teacherGrade: 'pending',
-                teacherPoints: question?.points || 10,
+                teacherPoints: question?.points || 1,
                 teacherFeedback: '',
                 gradedAt: Date.now(),
               },
@@ -1263,6 +1311,7 @@ export class RealtimeClient {
   ) {
     if (this.serverlessSession) {
       const qAns = this.serverlessSession.answers[questionIndex] || {};
+      const oldPts = qAns[teamId]?.pointsAwarded || 0;
       if (qAns[teamId]) {
         qAns[teamId].pointsAwarded = points;
         qAns[teamId].isCorrect = isCorrect;
@@ -1277,7 +1326,7 @@ export class RealtimeClient {
       }
       this.serverlessSession.answers[questionIndex] = qAns;
       if (this.serverlessSession.teams[teamId]) {
-        this.serverlessSession.teams[teamId].score = (this.serverlessSession.teams[teamId].score || 0) + points;
+        this.serverlessSession.teams[teamId].score = Math.max(0, (this.serverlessSession.teams[teamId].score || 0) - oldPts + points);
       }
       this.broadcastSession(this.serverlessSession);
       this.emit('session_updated', { session: this.serverlessSession });

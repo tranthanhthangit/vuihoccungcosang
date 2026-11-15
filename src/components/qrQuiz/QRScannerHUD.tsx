@@ -247,7 +247,7 @@ export const QRScannerHUD: React.FC<QRScannerHUDProps> = ({
                   detectedAngle: result.angle,
                   timestamp: now,
                   isCorrect,
-                  pointsAwarded: isCorrect ? (currentQuestion?.points || 10) : 0,
+                  pointsAwarded: isCorrect ? (currentQuestion?.points || 1) : 0,
                 };
 
                 onRecordAnswer(submission);
@@ -460,14 +460,21 @@ export const QRScannerHUD: React.FC<QRScannerHUDProps> = ({
             {isRevealed && (
               <div className="mt-1.5 flex items-center gap-2 text-xs font-bold text-emerald-400">
                 <span>Đáp án đúng:</span>
-                <span className="w-5 h-5 rounded-md bg-emerald-500 text-slate-950 flex items-center justify-center font-extrabold text-[11px]">
+                <span className="w-5 h-5 rounded-md bg-emerald-500 text-slate-950 flex items-center justify-center font-extrabold text-[11px] shrink-0">
                   {currentQuestion.correctAnswer}
                 </span>
-                <span>
+                {currentQuestion.options?.[currentQuestion.correctAnswer]?.imageUrl && (
+                  <img
+                    src={currentQuestion.options[currentQuestion.correctAnswer].imageUrl}
+                    alt={`Đáp án ${currentQuestion.correctAnswer}`}
+                    className="w-7 h-7 rounded object-cover border border-emerald-400/50 bg-white shrink-0"
+                  />
+                )}
+                <span className="truncate">
                   (
                   {currentQuestion.options?.[currentQuestion.correctAnswer]?.text ||
                     (currentQuestion as any)[`option${currentQuestion.correctAnswer}`] ||
-                    'Chính xác'}
+                    (currentQuestion.options?.[currentQuestion.correctAnswer]?.imageUrl ? 'Hình ảnh' : 'Chính xác')}
                   )
                 </span>
               </div>

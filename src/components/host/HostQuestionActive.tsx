@@ -5,7 +5,7 @@ import { TEAM_PRESETS } from '../../data/teamPresets';
 import { sounds } from '../../utils/sound';
 import { realtime } from '../../services/realtimeClient';
 import { HtmlGamePreviewModal } from '../games/HtmlGamePreviewModal';
-import { speakQuestionWithOptions, stopSpeaking, subscribeSpeakingState, unlockSpeechAudio } from '../../utils/speechVoice';
+import { speakQuestionWithOptions, speakOption, stopSpeaking, subscribeSpeakingState, unlockSpeechAudio } from '../../utils/speechVoice';
 
 import { DualQuestionPane } from './DualQuestionPane';
 
@@ -626,7 +626,7 @@ export const HostQuestionActive: React.FC<HostQuestionActiveProps> = ({
                 title="Bấm để phát âm thanh câu hỏi và các đáp án cho cả lớp cùng nghe"
               >
                 {isSpeaking ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5 text-indigo-600" />}
-                <span>{isSpeaking ? 'Dừng đọc' : '🔊 Phát giọng đọc câu hỏi cho cả lớp'}</span>
+                <span>{isSpeaking ? 'Dừng đọc' : '🔊 Đọc câu hỏi & các đáp án'}</span>
               </button>
             </div>
 
@@ -654,6 +654,18 @@ export const HostQuestionActive: React.FC<HostQuestionActiveProps> = ({
                           <span className="font-extrabold text-slate-800 text-base sm:text-lg flex-1 text-left truncate">
                             {opt.text}
                           </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              unlockSpeechAudio();
+                              speakOption(optLetter, opt.text);
+                            }}
+                            className="p-1.5 rounded-xl hover:bg-indigo-100 text-slate-400 hover:text-indigo-700 transition cursor-pointer shrink-0"
+                            title={`Nghe đọc đáp án ${optLetter}`}
+                          >
+                            <Volume2 className="w-4 h-4" />
+                          </button>
                         </div>
 
                         <div className="w-full my-2 bg-white rounded-xl p-1.5 border border-slate-200 shadow-2xs flex items-center justify-center">
@@ -687,9 +699,22 @@ export const HostQuestionActive: React.FC<HostQuestionActiveProps> = ({
                           />
                         )}
 
-                        <span className="font-extrabold text-slate-800 text-base sm:text-lg">
+                        <span className="font-extrabold text-slate-800 text-base sm:text-lg flex-1">
                           {opt.text}
                         </span>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            unlockSpeechAudio();
+                            speakOption(optLetter, opt.text);
+                          }}
+                          className="p-1.5 rounded-xl hover:bg-indigo-100 text-slate-400 hover:text-indigo-700 transition cursor-pointer shrink-0"
+                          title={`Nghe đọc đáp án ${optLetter}`}
+                        >
+                          <Volume2 className="w-4 h-4" />
+                        </button>
                       </>
                     )}
                   </div>

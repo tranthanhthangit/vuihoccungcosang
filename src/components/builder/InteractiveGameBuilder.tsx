@@ -211,7 +211,7 @@ export const InteractiveGameBuilder: React.FC<InteractiveGameBuilderProps> = ({
       ],
       timeLimit: 0,
       noTimeLimit: true,
-      points: 10,
+      points: 1,
       explanation: `Hoan hô bé đã nhận biết chuẩn xác hình ảnh ${cleanName}!`,
       canvasConfig: {
         width: 1280,
@@ -313,7 +313,7 @@ export const InteractiveGameBuilder: React.FC<InteractiveGameBuilderProps> = ({
             sourceId: correctCardId,
             targetId: targetZoneId,
             isCorrect: true,
-            points: 10,
+            points: 1,
           },
         ],
       },
@@ -474,7 +474,7 @@ export const InteractiveGameBuilder: React.FC<InteractiveGameBuilderProps> = ({
           sourceId: cardId,
           targetId: targetZoneId,
           isCorrect: true,
-          points: 10,
+          points: 1,
         });
       }
     });

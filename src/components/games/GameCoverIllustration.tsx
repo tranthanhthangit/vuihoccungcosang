@@ -14,8 +14,20 @@ export const GameCoverIllustration: React.FC<GameCoverIllustrationProps> = ({
 
   // 1. Detect if any direct image exists in the game or its questions
   const directImageUrl = useMemo(() => {
-    if (game.coverImage && game.coverImage.trim()) return game.coverImage.trim();
-    if (game.thumbnailUrl && game.thumbnailUrl.trim()) return game.thumbnailUrl.trim();
+    if (
+      game.coverImage &&
+      game.coverImage.trim() &&
+      !game.coverImage.startsWith('/assets/aistudio/game_thumb_')
+    ) {
+      return game.coverImage.trim();
+    }
+    if (
+      game.thumbnailUrl &&
+      game.thumbnailUrl.trim() &&
+      !game.thumbnailUrl.startsWith('/assets/aistudio/game_thumb_')
+    ) {
+      return game.thumbnailUrl.trim();
+    }
 
     if (game.questions && game.questions.length > 0) {
       // Check for first question image

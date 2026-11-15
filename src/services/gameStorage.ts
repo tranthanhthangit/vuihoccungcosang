@@ -1,6 +1,7 @@
 import { Game } from '../types/game';
 import { DEFAULT_GAMES } from '../data/defaultGames';
 import { supabase, isSupabaseConfigured } from './supabase';
+import { getGameThumbnail } from '../utils/gameThumbnails';
 
 
 const STORAGE_KEY = 'vuihoc_custom_games';
@@ -250,6 +251,9 @@ function initMemoryCache(): void {
         if (DEFAULT_GAMES.some(d => d.id === g.id)) {
           g.isSystemDefault = true;
           if (!g.visibility) g.visibility = 'public';
+        }
+        if (!g.coverImage || g.coverImage.trim() === '') {
+          g.coverImage = getGameThumbnail(g);
         }
         if (g.settings && (!g.settings.maxTeams || g.settings.maxTeams < 12)) {
           g.settings.maxTeams = 12;
@@ -528,6 +532,9 @@ export function getAllGames(): Game[] {
   return cachedGames
     .filter(g => !g.deletedAt)
     .map(g => {
+      if (!g.coverImage || g.coverImage.trim() === '') {
+        g.coverImage = getGameThumbnail(g);
+      }
       if (g.gameUrl && Array.isArray(g.questions)) {
         g.questions.forEach(q => {
           if (q.type === 'html_game' && !q.gameUrl) {

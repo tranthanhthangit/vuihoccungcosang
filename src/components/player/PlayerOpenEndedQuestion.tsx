@@ -174,14 +174,27 @@ export const PlayerOpenEndedQuestion: React.FC<PlayerOpenEndedQuestionProps> = (
     return latestDrawingDataUrlRef.current || (typeof window !== 'undefined' ? localStorage.getItem(storageKey) || '' : '');
   };
 
+  const lastSyncedTextRef = useRef<string>(existingAnswer?.openEnded?.textAnswer || '');
+  const onSubmitOpenEndedRef = useRef(onSubmitOpenEnded);
+  onSubmitOpenEndedRef.current = onSubmitOpenEnded;
+  const effectiveRoomRef = useRef(effectiveRoom);
+  effectiveRoomRef.current = effectiveRoom;
+  const effectiveTeamRef = useRef(effectiveTeam);
+  effectiveTeamRef.current = effectiveTeam;
+  const questionIndexRef = useRef(questionIndex);
+  questionIndexRef.current = questionIndex;
+
   // Auto-sync draft whenever kid draws or types so server has it authoritatively at any millisecond
   const syncDraftToServer = (explicitDataUrl?: string) => {
     const currentDrawing = explicitDataUrl !== undefined ? explicitDataUrl : captureCanvas();
     const currentText = textAnswerRef.current.trim();
+    const curRoom = effectiveRoomRef.current;
+    const curTeam = effectiveTeamRef.current;
 
-    if (effectiveRoom && effectiveTeam) {
-      realtime.saveOpenEndedDraft(effectiveRoom, effectiveTeam, questionIndex, currentText, currentDrawing, Boolean(hasDrawnRef.current || (currentDrawing && currentDrawing.length > 50)));
+    if (curRoom && curTeam) {
+      realtime.saveOpenEndedDraft(curRoom, curTeam, questionIndexRef.current, currentText, currentDrawing, Boolean(hasDrawnRef.current || (currentDrawing && currentDrawing.length > 50)));
       lastSyncedDrawingRef.current = currentDrawing;
+      lastSyncedTextRef.current = textAnswerRef.current;
     }
   };
 
@@ -197,34 +210,46 @@ export const PlayerOpenEndedQuestion: React.FC<PlayerOpenEndedQuestionProps> = (
       }
     }
     const finalText = textAnswerRef.current.trim();
+    const curRoom = effectiveRoomRef.current;
+    const curTeam = effectiveTeamRef.current;
 
-    if (effectiveRoom && effectiveTeam) {
-      realtime.saveOpenEndedDraft(effectiveRoom, effectiveTeam, questionIndex, finalText, finalDrawing, Boolean(hasDrawnRef.current || (finalDrawing && finalDrawing.length > 50)));
+    if (curRoom && curTeam) {
+      realtime.saveOpenEndedDraft(curRoom, curTeam, questionIndexRef.current, finalText, finalDrawing, Boolean(hasDrawnRef.current || (finalDrawing && finalDrawing.length > 50)));
     }
-    onSubmitOpenEnded(finalText, finalDrawing);
+    onSubmitOpenEndedRef.current(finalText, finalDrawing);
   };
+
+  const flushAndSubmitRef = useRef(flushAndSubmit);
+  flushAndSubmitRef.current = flushAndSubmit;
+  const syncDraftToServerRef = useRef(syncDraftToServer);
+  syncDraftToServerRef.current = syncDraftToServer;
 
   // Listen to authoritative session updates: if teacher clicked "Kết thúc câu", flush and submit immediately
   useEffect(() => {
     const unsub = realtime.on('session_updated', (data: any) => {
       const sess = data?.session;
-      if (sess && sess.questionStatus !== 'active' && sess.questionStatus !== 'waiting') {
+      if (
+        sess &&
+        (!effectiveRoomRef.current || sess.roomCode === effectiveRoomRef.current) &&
+        sess.questionStatus !== 'active' &&
+        sess.questionStatus !== 'waiting'
+      ) {
         if (!hasSubmittedRef.current) {
-          flushAndSubmit();
+          flushAndSubmitRef.current();
         }
       }
     });
     return () => unsub();
-  }, [roomCode, teamId, questionIndex, onSubmitOpenEnded]);
+  }, []);
 
-  // Unmount cleanup
+  // Unmount cleanup ONLY on real component unmount
   useEffect(() => {
     return () => {
       if (!hasSubmittedRef.current) {
-        flushAndSubmit();
+        flushAndSubmitRef.current();
       }
     };
-  }, [onSubmitOpenEnded, roomCode, teamId, questionIndex]);
+  }, []);
 
   // Periodic continuous draft syncing every 1.5 seconds while drawing / typing
   useEffect(() => {
@@ -232,20 +257,20 @@ export const PlayerOpenEndedQuestion: React.FC<PlayerOpenEndedQuestionProps> = (
     const interval = setInterval(() => {
       if (hasDrawnRef.current || textAnswerRef.current.trim()) {
         const currentData = captureCanvas();
-        if (currentData !== lastSyncedDrawingRef.current || textAnswerRef.current !== textAnswer) {
-          syncDraftToServer(currentData);
+        if (currentData !== lastSyncedDrawingRef.current || textAnswerRef.current !== lastSyncedTextRef.current) {
+          syncDraftToServerRef.current(currentData);
         }
       }
     }, 1500);
 
     return () => clearInterval(interval);
-  }, [hasSubmitted, roomCode, teamId, questionIndex, textAnswer]);
+  }, [hasSubmitted, questionIndex]);
 
   // Debounced draft sync when text answer changes
   useEffect(() => {
     const t = setTimeout(() => {
       const data = captureCanvas();
-      syncDraftToServer(data);
+      syncDraftToServerRef.current(data);
     }, 500);
     return () => clearTimeout(t);
   }, [textAnswer]);

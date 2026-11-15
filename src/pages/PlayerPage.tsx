@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { SessionState, ConnectedTeam, TeamAnswer } from '../types/game';
 import { realtime } from '../services/realtimeClient';
 import { PlayerJoin } from '../components/player/PlayerJoin';
@@ -46,6 +46,10 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
   const joinRetryTimerRef = useRef<number | null>(null);
   const joinTimeoutTimerRef = useRef<number | null>(null);
   const attemptedTeamIdRef = useRef<string | null>(null);
+  const sessionRef = useRef<SessionState | null>(session);
+  sessionRef.current = session;
+  const joinedTeamRef = useRef<ConnectedTeam | null>(joinedTeam);
+  joinedTeamRef.current = joinedTeam;
 
   const clearJoinTimers = () => {
     if (joinRetryTimerRef.current) {
@@ -64,18 +68,68 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
     };
   }, []);
 
+  // Keep mobile/tablet screen awake (Screen Wake Lock API) while child waits or plays
+  // Prevents tablet from auto-sleeping during the 15-minute sequential device setup!
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('wakeLock' in navigator)) return;
+    let wakeLockSentinel: any = null;
+
+    const requestWakeLock = async () => {
+      try {
+        if (document.visibilityState === 'visible') {
+          wakeLockSentinel = await (navigator as any).wakeLock.request('screen');
+        }
+      } catch {
+        // Silently ignore if browser requires user gesture first
+      }
+    };
+
+    requestWakeLock();
+
+    const handleVisibilityOrTouch = () => {
+      if (document.visibilityState === 'visible' && !wakeLockSentinel) {
+        requestWakeLock();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityOrTouch);
+    window.addEventListener('touchstart', handleVisibilityOrTouch, { passive: true });
+    window.addEventListener('click', handleVisibilityOrTouch, { passive: true });
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityOrTouch);
+      window.removeEventListener('touchstart', handleVisibilityOrTouch);
+      window.removeEventListener('click', handleVisibilityOrTouch);
+      if (wakeLockSentinel) {
+        try {
+          wakeLockSentinel.release();
+        } catch {}
+      }
+    };
+  }, []);
+
   // Restore saved team and room on phone refresh (only for SAME room)
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
       const urlRoom = (urlParams.get('room') || initialRoomCode || '').trim().toUpperCase();
-      const savedRoom = (localStorage.getItem('vuihoc_player_room') || '').trim().toUpperCase();
-      const savedTeamId = localStorage.getItem('vuihoc_player_team_id');
-      const savedDeviceId = localStorage.getItem('vuihoc_device_id');
+      const savedRoom = (
+        sessionStorage.getItem('vuihoc_player_room') ||
+        localStorage.getItem('vuihoc_player_room') ||
+        ''
+      ).trim().toUpperCase();
+      const savedTeamId =
+        sessionStorage.getItem('vuihoc_player_team_id') ||
+        localStorage.getItem('vuihoc_player_team_id');
+      const savedDeviceId =
+        sessionStorage.getItem('vuihoc_device_id') ||
+        localStorage.getItem('vuihoc_device_id');
 
       // If URL has a specific room that is different from previously saved room:
       // This is a NEW room scanned via QR code! Clear old team and do NOT auto-join!
       if (urlRoom && savedRoom && urlRoom !== savedRoom) {
+        sessionStorage.removeItem('vuihoc_player_room');
+        sessionStorage.removeItem('vuihoc_player_team_id');
         localStorage.removeItem('vuihoc_player_room');
         localStorage.removeItem('vuihoc_player_team_id');
         setRoomCode(urlRoom);
@@ -100,19 +154,25 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
     const unsubConn = realtime.on('connection_change', (data: any) => {
       const connected = data.status === 'connected';
       setIsConnected(connected);
-      if (connected && session && joinedTeam) {
-        realtime.requestSync(session.roomCode, 'player', joinedTeam.teamId);
+      const curSession = sessionRef.current;
+      const curTeam = joinedTeamRef.current;
+      if (connected && curSession && curTeam) {
+        realtime.requestSync(curSession.roomCode, 'player', curTeam.teamId);
       }
     });
 
     // Listen to join success (ONLY for this device/attempted team)
     const unsubJoin = realtime.on('join_success', (data: any) => {
-      const myDevId = typeof window !== 'undefined' ? localStorage.getItem('vuihoc_device_id') : null;
+      const myDevId =
+        typeof window !== 'undefined'
+          ? sessionStorage.getItem('vuihoc_device_id') || localStorage.getItem('vuihoc_device_id')
+          : null;
+      const curTeam = joinedTeamRef.current;
 
       // Only accept if this join_success is for our own device or requested team
       const isForMe = (myDevId && data.team?.deviceId && data.team.deviceId === myDevId) ||
         (attemptedTeamIdRef.current && data.team?.teamId === attemptedTeamIdRef.current) ||
-        (joinedTeam && data.team?.teamId === joinedTeam.teamId);
+        (curTeam && data.team?.teamId === curTeam.teamId);
 
       if (!isForMe) {
         // Do NOT overwrite our session or team with another device's data
@@ -126,6 +186,8 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
       setJoinError(null);
 
       if (typeof window !== 'undefined') {
+        sessionStorage.setItem('vuihoc_player_room', data.session.roomCode);
+        sessionStorage.setItem('vuihoc_player_team_id', data.team.teamId);
         localStorage.setItem('vuihoc_player_room', data.session.roomCode);
         localStorage.setItem('vuihoc_player_team_id', data.team.teamId);
         window.history.replaceState({}, '', `/join?room=${data.session.roomCode}`);
@@ -136,13 +198,22 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
     const unsubUpdate = realtime.on('session_updated', (data: any) => {
       if (!data || !data.session) return;
       setSession(data.session);
-      if (joinedTeam) {
-        const remoteTeam = data.session.teams?.[joinedTeam.teamId];
+      const curTeam = joinedTeamRef.current;
+      if (curTeam) {
+        const remoteTeam = data.session.teams?.[curTeam.teamId];
         if (remoteTeam) {
-          setJoinedTeam({
-            ...remoteTeam,
-            assignedSet: remoteTeam.assignedSet || data.session.teamAssignments?.[joinedTeam.teamId] || joinedTeam.assignedSet || 'A',
-          });
+          const nextSet = remoteTeam.assignedSet || data.session.teamAssignments?.[curTeam.teamId] || curTeam.assignedSet || 'A';
+          if (
+            remoteTeam.score !== curTeam.score ||
+            remoteTeam.teamName !== curTeam.teamName ||
+            remoteTeam.online !== curTeam.online ||
+            nextSet !== curTeam.assignedSet
+          ) {
+            setJoinedTeam({
+              ...remoteTeam,
+              assignedSet: nextSet,
+            });
+          }
         }
       }
     });
@@ -161,6 +232,8 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
 
       if (data.message && data.message.includes('không tồn tại')) {
         if (typeof window !== 'undefined') {
+          sessionStorage.removeItem('vuihoc_player_room');
+          sessionStorage.removeItem('vuihoc_player_team_id');
           localStorage.removeItem('vuihoc_player_room');
           localStorage.removeItem('vuihoc_player_team_id');
         }
@@ -169,7 +242,8 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
 
     // Listen to team removed by host
     const unsubTeamRemoved = realtime.on('team_removed', (data: any) => {
-      if (joinedTeam && data.teamId === joinedTeam.teamId) {
+      const curTeam = joinedTeamRef.current;
+      if (curTeam && data.teamId === curTeam.teamId) {
         clearJoinTimers();
         setJoinError('Đội của bạn đã được đưa ra khỏi phòng.');
         setJoinedTeam(null);
@@ -184,7 +258,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
       unsubError();
       unsubTeamRemoved();
     };
-  }, [joinedTeam]);
+  }, []);
 
   // Sync joined state to parent App (for conditional header logo/home prompt)
   useEffect(() => {
@@ -211,11 +285,13 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
     };
   }, []);
 
-  // Periodic sync while in waiting lobby so that when host starts question 1,
-  // player immediately transitions out of lobby even if initial broadcast dropped
+  // Continuous sync during BOTH waiting lobby and active gameplay:
+  // 1. Keeps the student's presence online via HTTP + WebSocket even if WebSocket briefly drops during 15-minute setup.
+  // 2. Ensures immediate transition when host starts question 1, advances to next question, or shows results.
   useEffect(() => {
-    if (!session || !joinedTeam || session.status !== 'lobby') return;
+    if (!session || !joinedTeam || session.status === 'ended') return;
 
+    const intervalMs = session.status === 'lobby' ? 2500 : 3500;
     const syncInterval = window.setInterval(async () => {
       // 1. Send realtime sync request
       realtime.requestSync(session.roomCode, 'player', joinedTeam.teamId);
@@ -223,18 +299,51 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
       // 2. Fetch session snapshot from REST API as fallback with team-specific query
       try {
         const latest = await realtime.fetchSessionState(session.roomCode, joinedTeam.teamId);
-        if (latest && latest.status === 'playing') {
-          setSession(latest);
+        if (latest) {
+          setSession((prev) => {
+            if (!prev) return latest;
+            const prevMyAns = prev.answers?.[prev.currentQuestionIndex]?.[joinedTeam.teamId];
+            const nextMyAns = latest.answers?.[latest.currentQuestionIndex]?.[joinedTeam.teamId];
+            const prevSet = prev.teamAssignments?.[joinedTeam.teamId];
+            const nextSet = latest.teamAssignments?.[joinedTeam.teamId];
+            // Update if status, question index, question status, start time, assignment, or my answer/grade changed
+            if (
+              prev.status !== latest.status ||
+              prev.currentQuestionIndex !== latest.currentQuestionIndex ||
+              prev.questionStatus !== latest.questionStatus ||
+              prev.questionStartTime !== latest.questionStartTime ||
+              prev.isDualMode !== latest.isDualMode ||
+              prev.myAssignedSet !== latest.myAssignedSet ||
+              prevSet !== nextSet ||
+              prevMyAns?.submittedAt !== nextMyAns?.submittedAt ||
+              prevMyAns?.pointsAwarded !== nextMyAns?.pointsAwarded ||
+              prevMyAns?.openEnded?.teacherGrade !== nextMyAns?.openEnded?.teacherGrade ||
+              prevMyAns?.openEnded?.teacherFeedback !== nextMyAns?.openEnded?.teacherFeedback ||
+              prevMyAns?.openEnded?.annotatedDrawingDataUrl !== nextMyAns?.openEnded?.annotatedDrawingDataUrl
+            ) {
+              return latest;
+            }
+            return prev;
+          });
           if (latest.teams?.[joinedTeam.teamId]) {
             const upd = latest.teams[joinedTeam.teamId];
-            setJoinedTeam({
-              ...upd,
-              assignedSet: upd.assignedSet || latest.teamAssignments?.[joinedTeam.teamId] || joinedTeam.assignedSet || 'A',
+            const nextSet = upd.assignedSet || latest.teamAssignments?.[joinedTeam.teamId] || joinedTeam.assignedSet || 'A';
+            setJoinedTeam((prevTeam) => {
+              if (!prevTeam) return { ...upd, assignedSet: nextSet };
+              if (
+                prevTeam.score === upd.score &&
+                prevTeam.teamName === upd.teamName &&
+                prevTeam.online === upd.online &&
+                prevTeam.assignedSet === nextSet
+              ) {
+                return prevTeam;
+              }
+              return { ...upd, assignedSet: nextSet };
             });
           }
         }
       } catch {}
-    }, 2000);
+    }, intervalMs);
 
     return () => clearInterval(syncInterval);
   }, [session?.status, session?.roomCode, joinedTeam?.teamId]);
@@ -242,8 +351,10 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
   // Notify server only when browser tab is definitively closed
   useEffect(() => {
     const handleUnload = () => {
-      if (session && joinedTeam) {
-        realtime.leaveRoom(session.roomCode, joinedTeam.teamId, joinedTeam.deviceId);
+      const curSession = sessionRef.current;
+      const curTeam = joinedTeamRef.current;
+      if (curSession && curTeam) {
+        realtime.leaveRoom(curSession.roomCode, curTeam.teamId, curTeam.deviceId);
       }
     };
 
@@ -251,7 +362,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
     return () => {
       window.removeEventListener('beforeunload', handleUnload);
     };
-  }, [session, joinedTeam]);
+  }, []);
 
   const handleJoin = (code: string, teamId: string, devId: string, customTeamName?: string) => {
     setIsJoining(true);
@@ -287,48 +398,56 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
     }, 8000);
   };
 
-  const handleSubmitAnswer = (answerId: string, answerIds?: string[]) => {
-    if (!session || !joinedTeam) return;
+  const handleSubmitAnswer = useCallback((answerId: string, answerIds?: string[]) => {
+    const curSession = sessionRef.current;
+    const curTeam = joinedTeamRef.current;
+    if (!curSession || !curTeam) return;
     realtime.submitAnswer(
-      session.roomCode,
-      joinedTeam.teamId,
-      session.currentQuestionIndex,
+      curSession.roomCode,
+      curTeam.teamId,
+      curSession.currentQuestionIndex,
       answerId,
       answerIds
     );
-  };
+  }, []);
 
-  const handleSubmitDragPlacements = (placements: Record<string, string>, isFinal: boolean) => {
-    if (!session || !joinedTeam) return;
+  const handleSubmitDragPlacements = useCallback((placements: Record<string, string>, isFinal: boolean) => {
+    const curSession = sessionRef.current;
+    const curTeam = joinedTeamRef.current;
+    if (!curSession || !curTeam) return;
     realtime.send({
       type: 'player:submit_answer',
-      roomCode: session.roomCode,
-      teamId: joinedTeam.teamId,
-      questionIndex: session.currentQuestionIndex,
+      roomCode: curSession.roomCode,
+      teamId: curTeam.teamId,
+      questionIndex: curSession.currentQuestionIndex,
       placements,
       liveProgress: !isFinal,
     });
-  };
+  }, []);
 
-  const handleSubmitHtmlGameResult = (result: any) => {
-    if (!session || !joinedTeam) return;
+  const handleSubmitHtmlGameResult = useCallback((result: any) => {
+    const curSession = sessionRef.current;
+    const curTeam = joinedTeamRef.current;
+    if (!curSession || !curTeam) return;
     realtime.send({
       type: 'player:submit_answer',
-      roomCode: session.roomCode,
-      teamId: joinedTeam.teamId,
-      questionIndex: session.currentQuestionIndex,
+      roomCode: curSession.roomCode,
+      teamId: curTeam.teamId,
+      questionIndex: curSession.currentQuestionIndex,
       htmlGameResult: result,
       answerId: 'html_game_complete',
     });
-  };
+  }, []);
 
-  const handleSubmitOpenEnded = (textAnswer: string, drawingDataUrl: string, explicitQIndex?: number) => {
-    if (!session || !joinedTeam) return;
-    const targetQIdx = explicitQIndex !== undefined ? explicitQIndex : session.currentQuestionIndex;
+  const handleSubmitOpenEnded = useCallback((textAnswer: string, drawingDataUrl: string, explicitQIndex?: number) => {
+    const curSession = sessionRef.current;
+    const curTeam = joinedTeamRef.current;
+    if (!curSession || !curTeam) return;
+    const targetQIdx = explicitQIndex !== undefined ? explicitQIndex : curSession.currentQuestionIndex;
     realtime.send({
       type: 'player:submit_answer',
-      roomCode: session.roomCode,
-      teamId: joinedTeam.teamId,
+      roomCode: curSession.roomCode,
+      teamId: curTeam.teamId,
       questionIndex: targetQIdx,
       answerId: 'open_ended_submitted',
       openEnded: {
@@ -336,20 +455,22 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
         drawingDataUrl,
       },
     });
-  };
+  }, []);
 
-  const handleSubmitWordDrag = (chosenLetter: string, _isCorrect: boolean) => {
-    if (!session || !joinedTeam) return;
+  const handleSubmitWordDrag = useCallback((chosenLetter: string, _isCorrect: boolean) => {
+    const curSession = sessionRef.current;
+    const curTeam = joinedTeamRef.current;
+    if (!curSession || !curTeam) return;
     realtime.send({
       type: 'player:submit_answer',
-      roomCode: session.roomCode,
-      teamId: joinedTeam.teamId,
-      questionIndex: session.currentQuestionIndex,
+      roomCode: curSession.roomCode,
+      teamId: curTeam.teamId,
+      questionIndex: curSession.currentQuestionIndex,
       answerId: chosenLetter,
       answerIds: [chosenLetter],
       chosenLetter,
     });
-  };
+  }, []);
 
 
   const handleExitToHome = () => {
@@ -359,6 +480,8 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
       realtime.leaveRoom(session.roomCode, joinedTeam.teamId, joinedTeam.deviceId);
     }
     if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('vuihoc_player_room');
+      sessionStorage.removeItem('vuihoc_player_team_id');
       localStorage.removeItem('vuihoc_player_room');
       localStorage.removeItem('vuihoc_player_team_id');
       window.history.replaceState({}, '', '/');
@@ -448,7 +571,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
             drawingDataUrl: localSavedDrawing,
             hasDrawn: true,
             teacherGrade: 'pending',
-            teacherPoints: currentQ.points || 10,
+            teacherPoints: currentQ.points || 1,
             teacherFeedback: '',
             gradedAt: Date.now(),
           },
@@ -464,7 +587,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
             drawingDataUrl: localSavedDrawing,
             hasDrawn: true,
             teacherGrade: myAnswer.openEnded?.teacherGrade || 'pending',
-            teacherPoints: myAnswer.openEnded?.teacherPoints ?? (currentQ.points || 10),
+            teacherPoints: myAnswer.openEnded?.teacherPoints ?? (currentQ.points || 1),
           },
         };
       }
@@ -508,7 +631,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
           Boolean(effectiveGame.isZipArchive)
         ) ? (
           <PlayerHtmlQuestion
-            key={`q_html_${currentQIndex}`}
+            key={`q_html_${currentQ.id}_${currentQIndex}`}
             question={currentQ}
             gameUrl={currentQ.gameUrl || effectiveGame.gameUrl}
             questionIndex={currentQIndex}
@@ -521,7 +644,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
         ) : (currentQ.type === 'word_drag_drop') ? (
           <div className="flex-1 min-h-0 h-full max-h-full overflow-hidden flex flex-col">
             <PlayerWordDragQuestion
-              key={`q_word_${currentQIndex}`}
+              key={`q_word_${currentQ.id}_${currentQIndex}`}
               question={{ ...currentQ, noTimeLimit: isNoLimitQ }}
               questionIndex={currentQIndex}
               totalQuestions={effectiveGame.questions.length}
@@ -533,7 +656,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
           </div>
         ) : ((currentQ.type === 'drag_drop' || Boolean(currentQ.canvasConfig)) && currentQ.canvasConfig) ? (
           <PlayerDragDropQuestion
-            key={`q_drag_${currentQIndex}`}
+            key={`q_drag_${currentQ.id}_${currentQIndex}`}
             question={{ ...currentQ, noTimeLimit: isNoLimitQ }}
             questionIndex={currentQIndex}
             totalQuestions={effectiveGame.questions.length}
@@ -545,7 +668,7 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
         ) : (currentQ.type === 'open_ended') ? (
           <div className="flex-1 min-h-0 h-full max-h-full overflow-hidden flex flex-col">
             <PlayerOpenEndedQuestion
-              key={`q_open_${currentQIndex}`}
+              key={`q_open_${currentQ.id}_${currentQIndex}`}
               question={{ ...currentQ, noTimeLimit: true }}
               questionIndex={currentQIndex}
               totalQuestions={effectiveGame.questions.length}
@@ -554,13 +677,13 @@ export const PlayerPage: React.FC<PlayerPageProps> = ({
               roomCode={session.roomCode}
               teamId={joinedTeam.teamId}
               existingAnswer={myAnswer}
-              onSubmitOpenEnded={(text, draw) => handleSubmitOpenEnded(text, draw, currentQIndex)}
+              onSubmitOpenEnded={handleSubmitOpenEnded}
             />
           </div>
         ) : (
           <div className="flex-1 min-h-0 h-full overflow-y-auto overscroll-contain pb-4 sm:pb-6">
             <PlayerQuestion
-              key={`q_choice_${currentQIndex}`}
+              key={`q_choice_${currentQ.id}_${currentQIndex}`}
               question={{ ...currentQ, noTimeLimit: isNoLimitQ }}
               questionIndex={currentQIndex}
               totalQuestions={effectiveGame.questions.length}

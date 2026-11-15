@@ -758,9 +758,23 @@ interface SocketMeta {
   teamId?: string;
   deviceId?: string;
   isAlive: boolean;
+  missedPings?: number;
 }
 
 const socketMap = new Map<WebSocket, SocketMeta>();
+
+// Check if any OTHER open WebSocket is currently active for the given room and teamId
+function hasOtherActiveSocketForTeam(roomCode: string, teamId: string, excludeWs?: WebSocket): boolean {
+  for (const client of wss.clients) {
+    if (client !== excludeWs && client.readyState === WebSocket.OPEN) {
+      const m = socketMap.get(client);
+      if (m && m.roomCode === roomCode && m.teamId === teamId) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 // Broadcast helper with server timestamp injection
 function broadcastToRoom(roomCode: string, payload: { type: string; data?: any }, excludeWs?: WebSocket) {
@@ -833,64 +847,42 @@ function getSanitizedSessionForPlayer(session: SessionState, targetTeamId?: stri
 
   if (cloned.questionStatus === 'active' || cloned.questionStatus === 'waiting') {
     const qIndex = cloned.currentQuestionIndex;
-    const currentQ = cloned.game.questions[qIndex];
-    if (currentQ) {
-      if (!currentQ.gameUrl && cloned.game.gameUrl) {
-        currentQ.gameUrl = cloned.game.gameUrl;
-      }
-      currentQ.explanation = undefined;
-      // Strip isCorrect flag from multiple choice options
-      if (currentQ.options) {
-        const correctCount = currentQ.options.filter(opt => opt.isCorrect).length;
-        if (correctCount > 1) {
-          currentQ.allowMultipleCorrect = true;
+    const sanitizeGameQuestions = (targetGame?: Game) => {
+      if (!targetGame || !Array.isArray(targetGame.questions)) return;
+      targetGame.questions.forEach((q) => {
+        if (!q.gameUrl && targetGame.gameUrl) {
+          q.gameUrl = targetGame.gameUrl;
         }
-        currentQ.options = currentQ.options.map(opt => ({
-          id: opt.id,
-          text: opt.text,
-          imageUrl: opt.imageUrl,
-          isCorrect: false,
-        }));
-      }
-
-      // If interactive drag-drop, strip isCorrect flag from rules so client cannot inspect rules
-      if (currentQ.canvasConfig && currentQ.canvasConfig.rules) {
-        currentQ.canvasConfig.rules = currentQ.canvasConfig.rules.map(r => ({
-          id: r.id,
-          sourceId: r.sourceId,
-          targetId: r.targetId,
-          isCorrect: false,
-          points: 0,
-        }));
-      }
-    }
-
-    // Also sanitize cloned.gameB if present so client can't inspect answers in gameB
-    if (cloned.gameB && cloned.gameB.questions?.[qIndex]) {
-      const currentQB = cloned.gameB.questions[qIndex];
-      currentQB.explanation = undefined;
-      if (currentQB.options) {
-        const correctCountB = currentQB.options.filter(opt => opt.isCorrect).length;
-        if (correctCountB > 1) {
-          currentQB.allowMultipleCorrect = true;
+        q.explanation = undefined;
+        if (q.options) {
+          const correctCount = q.options.filter(opt => opt.isCorrect).length;
+          if (correctCount > 1) {
+            q.allowMultipleCorrect = true;
+          }
+          q.options = q.options.map(opt => ({
+            id: opt.id,
+            text: opt.text,
+            imageUrl: opt.imageUrl,
+            imageFit: opt.imageFit,
+            imageHeight: opt.imageHeight,
+            isCorrect: false,
+          }));
         }
-        currentQB.options = currentQB.options.map(opt => ({
-          id: opt.id,
-          text: opt.text,
-          imageUrl: opt.imageUrl,
-          isCorrect: false,
-        }));
-      }
-      if (currentQB.canvasConfig && currentQB.canvasConfig.rules) {
-        currentQB.canvasConfig.rules = currentQB.canvasConfig.rules.map(r => ({
-          id: r.id,
-          sourceId: r.sourceId,
-          targetId: r.targetId,
-          isCorrect: false,
-          points: 0,
-        }));
-      }
-    }
+        if (q.canvasConfig && q.canvasConfig.rules) {
+          q.canvasConfig.rules = q.canvasConfig.rules.map(r => ({
+            id: r.id,
+            sourceId: r.sourceId,
+            targetId: r.targetId,
+            isCorrect: false,
+            points: 0,
+          }));
+        }
+      });
+    };
+
+    sanitizeGameQuestions(cloned.game);
+    sanitizeGameQuestions(cloned.gameA);
+    sanitizeGameQuestions(cloned.gameB);
 
     // Hide choices and correctness of answers while question is running
     const qAnswers = cloned.answers[qIndex] || {};
@@ -912,10 +904,26 @@ function getSanitizedSessionForPlayer(session: SessionState, targetTeamId?: stri
           isCorrect: false,
           pointsAwarded: 0,
           actions: [],
+          openEnded: undefined,
         };
       }
     }
     cloned.answers[qIndex] = sanitizedAnswers;
+  }
+
+  // Strip other teams' heavy base64 drafts from player payloads so 12-device broadcasts stay lightweight
+  if (cloned.drafts) {
+    if (targetTeamId) {
+      const myDraftsOnly: Record<string, any> = {};
+      for (const [qKey, qDraftMap] of Object.entries(cloned.drafts)) {
+        if (qDraftMap && qDraftMap[targetTeamId]) {
+          myDraftsOnly[qKey] = { [targetTeamId]: qDraftMap[targetTeamId] };
+        }
+      }
+      cloned.drafts = myDraftsOnly;
+    } else {
+      cloned.drafts = {};
+    }
   }
 
   return cloned;
@@ -924,18 +932,25 @@ function getSanitizedSessionForPlayer(session: SessionState, targetTeamId?: stri
 // Broadcasts authoritative session state to every socket in the room,
 // with proper per-role and per-team sanitization so no team ever gets another team's question set
 function broadcastSessionState(session: SessionState, roomCode: string) {
+  let cachedHostSession: SessionState | null = null;
   wss.clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
       const cMeta = socketMap.get(client);
       if (cMeta && cMeta.roomCode === roomCode) {
-        sendToSocket(client, {
-          type: 'session_updated',
-          data: {
-            session: cMeta.role === 'host'
-              ? getSanitizedSessionForHost(session)
-              : getSanitizedSessionForPlayer(session, cMeta.teamId),
-          },
-        });
+        if (cMeta.role === 'host') {
+          if (!cachedHostSession) {
+            cachedHostSession = getSanitizedSessionForHost(session);
+          }
+          sendToSocket(client, {
+            type: 'session_updated',
+            data: { session: cachedHostSession },
+          });
+        } else {
+          sendToSocket(client, {
+            type: 'session_updated',
+            data: { session: getSanitizedSessionForPlayer(session, cMeta.teamId) },
+          });
+        }
       }
     }
   });
@@ -1151,44 +1166,67 @@ function endQuestionAuthoritatively(session: SessionState, code: string) {
 }
 
 // Active Presence & Ping/Pong watchdog
-// Checks both socket connectivity and application-level team heartbeats
+// Tuned for classroom stability (12+ devices over 15+ minutes setup/gameplay)
 const presenceWatchdog = setInterval(() => {
   const now = Date.now();
 
-  // 1. Socket level ping-pong check
+  // 1. Socket level ping-pong check (allows up to 3 missed 15s cycles = 45s grace before terminating socket)
   wss.clients.forEach((ws) => {
     const meta = socketMap.get(ws);
     if (!meta) return;
     if (!meta.isAlive) {
-      if (meta.roomCode && meta.teamId) {
-        const session = sessions.get(meta.roomCode);
-        if (session && session.teams[meta.teamId]) {
-          session.teams[meta.teamId].online = false;
-          broadcastToRoom(meta.roomCode, {
-            type: 'team_presence_changed',
-            data: { teamId: meta.teamId, online: false },
-          });
-          broadcastSessionState(session, meta.roomCode);
-          broadcastToRoom(meta.roomCode, {
-            type: 'teams_updated',
-            data: {
-              roomCode: meta.roomCode,
-              teams: session.teams,
-            },
-          });
+      meta.missedPings = (meta.missedPings || 0) + 1;
+      if (meta.missedPings >= 3) {
+        if (meta.roomCode && meta.teamId) {
+          const session = sessions.get(meta.roomCode);
+          // Only mark offline if no newer socket has already connected for this team
+          if (
+            session &&
+            session.teams[meta.teamId] &&
+            !hasOtherActiveSocketForTeam(meta.roomCode, meta.teamId, ws)
+          ) {
+            const lastSeenAge = now - (session.teams[meta.teamId].lastSeen || 0);
+            if (lastSeenAge > 45000) {
+              session.teams[meta.teamId].online = false;
+              broadcastToRoom(meta.roomCode, {
+                type: 'team_presence_changed',
+                data: { teamId: meta.teamId, online: false },
+              });
+              broadcastSessionState(session, meta.roomCode);
+              broadcastToRoom(meta.roomCode, {
+                type: 'teams_updated',
+                data: {
+                  roomCode: meta.roomCode,
+                  teams: session.teams,
+                },
+              });
+            }
+          }
         }
+        meta.teamId = undefined;
+        return ws.terminate();
       }
-      return ws.terminate();
+    } else {
+      meta.missedPings = 0;
     }
     meta.isAlive = false;
-    ws.ping();
+    try {
+      ws.ping();
+    } catch {}
   });
 
-  // 2. Application-level heartbeat timeout check (detects dead mobile clients within 25 seconds)
+  // 2. Application-level heartbeat timeout check
+  // In lobby (while teacher takes up to 15-20 mins setting up 12 devices), allow 120s grace; during play, allow 75s grace
   sessions.forEach((session, roomCode) => {
     let hasPresenceChange = false;
+    const offlineThresholdMs = session.status === 'lobby' ? 120000 : 75000;
     Object.values(session.teams).forEach((team) => {
-      if (team.online && team.lastSeen && (now - team.lastSeen > 25000)) {
+      if (
+        team.online &&
+        team.lastSeen &&
+        now - team.lastSeen > offlineThresholdMs &&
+        !hasOtherActiveSocketForTeam(roomCode, team.teamId)
+      ) {
         team.online = false;
         hasPresenceChange = true;
         broadcastToRoom(roomCode, {
@@ -1209,7 +1247,7 @@ const presenceWatchdog = setInterval(() => {
       });
     }
   });
-}, 4000);
+}, 15000);
 
 wss.on('close', () => {
   clearInterval(presenceWatchdog);
@@ -1217,11 +1255,21 @@ wss.on('close', () => {
 
 // WebSocket Connection handling
 wss.on('connection', (ws: WebSocket) => {
-  socketMap.set(ws, { ws, isAlive: true });
+  socketMap.set(ws, { ws, isAlive: true, missedPings: 0 });
 
   ws.on('pong', () => {
     const meta = socketMap.get(ws);
-    if (meta) meta.isAlive = true;
+    if (meta) {
+      meta.isAlive = true;
+      meta.missedPings = 0;
+      if (meta.roomCode && meta.teamId) {
+        const s = sessions.get(meta.roomCode);
+        if (s && s.teams[meta.teamId]) {
+          s.teams[meta.teamId].lastSeen = Date.now();
+          s.teams[meta.teamId].online = true;
+        }
+      }
+    }
   });
 
   ws.on('message', (messageRaw: string) => {
@@ -1229,6 +1277,15 @@ wss.on('connection', (ws: WebSocket) => {
       const msg = JSON.parse(messageRaw);
       const meta = socketMap.get(ws);
       if (!meta) return;
+      meta.isAlive = true;
+      meta.missedPings = 0;
+      if (meta.roomCode && meta.teamId) {
+        const s = sessions.get(meta.roomCode);
+        if (s && s.teams[meta.teamId]) {
+          s.teams[meta.teamId].lastSeen = Date.now();
+          s.teams[meta.teamId].online = true;
+        }
+      }
 
       switch (msg.type) {
         // ----------------------------------------------------
@@ -1514,12 +1571,20 @@ wss.on('connection', (ws: WebSocket) => {
           const teamIcon = preset ? preset.icon : '⭐';
           const teamColor = preset ? preset.bgColor : 'bg-blue-500';
 
-          // Close previous socket for same device if deviceId is non-empty
+          // Close previous socket for same team & device if deviceId is non-empty
+          // Clear otherMeta.teamId BEFORE terminating so the async 'close' event never marks the team offline!
           if (deviceId) {
             wss.clients.forEach((client) => {
               if (client !== ws && client.readyState === WebSocket.OPEN) {
                 const otherMeta = socketMap.get(client);
-                if (otherMeta && otherMeta.deviceId === deviceId && otherMeta.roomCode === code) {
+                if (
+                  otherMeta &&
+                  otherMeta.roomCode === code &&
+                  otherMeta.teamId === teamId &&
+                  (otherMeta.deviceId === deviceId || !existingTeam?.online)
+                ) {
+                  otherMeta.teamId = undefined;
+                  otherMeta.roomCode = undefined;
                   client.terminate();
                 }
               }
@@ -1594,14 +1659,17 @@ wss.on('connection', (ws: WebSocket) => {
         // HOST: START QUESTION
         // ----------------------------------------------------
         case 'host:start_question': {
-          const code = (msg.roomCode || '').toUpperCase();
+          const code = (msg.roomCode || meta.roomCode || '').toUpperCase();
           const qIndex = Number(msg.questionIndex ?? 0);
           const session = sessions.get(code);
 
-          if (!session || meta.role !== 'host') {
-            console.warn(`[start_question rejected] Unauthorized or session not found: code=${code}, role=${meta.role}`);
+          if (!session) {
+            console.warn(`[start_question rejected] Session not found: code=${code}`);
             return;
           }
+          // Auto-bind host role in case host WebSocket reconnected after idle period
+          meta.roomCode = code;
+          meta.role = 'host';
 
           const totalQuestions = session.isDualMode
             ? Math.max(session.game.questions.length, session.gameB?.questions?.length || 0)
@@ -1686,10 +1754,7 @@ wss.on('connection', (ws: WebSocket) => {
               ? `Tự luận: "${newText.trim().slice(0, 60)}${newText.trim().length > 60 ? '...' : ''}"`
               : (hasNewDrawing ? 'Bé đã vẽ tranh câu trả lời' : existingAns.answerText);
 
-            broadcastToRoom(code, {
-              type: 'session_updated',
-              data: { session },
-            });
+            broadcastSessionState(session, code);
           }
           break;
         }
@@ -1964,7 +2029,7 @@ wss.on('connection', (ws: WebSocket) => {
             }
 
             // Speed bonus ONLY if answers were 100% correct, pointsAwarded > 0, and session.settings.speedBonus
-            if (isCorrect && pointsAwarded >= maxPoints && session.settings.speedBonus) {
+            if (isCorrect && pointsAwarded >= maxPoints && session.settings.speedBonus && session.questionTimeLimit > 0) {
               const limitMs = session.questionTimeLimit * 1000;
               const remainingFraction = Math.max(0, (limitMs - responseTimeMs) / limitMs);
               const bonus = Math.round(4 * remainingFraction);
@@ -2080,7 +2145,7 @@ wss.on('connection', (ws: WebSocket) => {
             }
 
             // Speed bonus ONLY applies if all answers are 100% correct
-            if (isCorrect && pointsAwarded >= maxPoints && session.settings.speedBonus) {
+            if (isCorrect && pointsAwarded >= maxPoints && session.settings.speedBonus && session.questionTimeLimit > 0) {
               const limitMs = session.questionTimeLimit * 1000;
               const remainingFraction = Math.max(0, (limitMs - responseTimeMs) / limitMs);
               const bonus = Math.round(5 * remainingFraction);
@@ -2162,9 +2227,11 @@ wss.on('connection', (ws: WebSocket) => {
         // HOST: GRADE OPEN ENDED QUESTION
         // ----------------------------------------------------
         case 'host:grade_open_ended': {
-          const code = (msg.roomCode || '').toUpperCase();
+          const code = (msg.roomCode || meta.roomCode || '').toUpperCase();
           const session = sessions.get(code);
-          if (!session || meta.role !== 'host') return;
+          if (!session) return;
+          meta.roomCode = code;
+          meta.role = 'host';
 
           const qIdx = Number(msg.questionIndex);
           const tId = msg.teamId;
@@ -2205,6 +2272,8 @@ wss.on('connection', (ws: WebSocket) => {
           const code = (msg.roomCode || meta.roomCode || '').toUpperCase();
           const session = sessions.get(code);
           if (!session) return;
+          meta.roomCode = code;
+          meta.role = 'host';
           endQuestionAuthoritatively(session, code);
           break;
         }
@@ -2215,7 +2284,9 @@ wss.on('connection', (ws: WebSocket) => {
         case 'host:next_question': {
           const code = (msg.roomCode || meta.roomCode || '').toUpperCase();
           const session = sessions.get(code);
-          if (!session || meta.role !== 'host') return;
+          if (!session) return;
+          meta.roomCode = code;
+          meta.role = 'host';
 
           const maxQuestions = session.isDualMode
             ? Math.max(session.game.questions.length, session.gameB?.questions?.length || 0)
@@ -2254,9 +2325,11 @@ wss.on('connection', (ws: WebSocket) => {
         // HOST: SHOW LEADERBOARD
         // ----------------------------------------------------
         case 'host:show_leaderboard': {
-          const code = (msg.roomCode || '').toUpperCase();
+          const code = (msg.roomCode || meta.roomCode || '').toUpperCase();
           const session = sessions.get(code);
-          if (!session || meta.role !== 'host') return;
+          if (!session) return;
+          meta.roomCode = code;
+          meta.role = 'host';
 
           session.questionStatus = 'leaderboard';
           broadcastSessionState(session, code);
@@ -2267,9 +2340,11 @@ wss.on('connection', (ws: WebSocket) => {
         // HOST: END GAME EARLY
         // ----------------------------------------------------
         case 'host:end_game': {
-          const code = (msg.roomCode || '').toUpperCase();
+          const code = (msg.roomCode || meta.roomCode || '').toUpperCase();
           const session = sessions.get(code);
-          if (!session || meta.role !== 'host') return;
+          if (!session) return;
+          meta.roomCode = code;
+          meta.role = 'host';
 
           session.status = 'ended';
           session.endedAt = Date.now();
@@ -2284,9 +2359,11 @@ wss.on('connection', (ws: WebSocket) => {
         // HOST: RESTART GAME
         // ----------------------------------------------------
         case 'host:restart_game': {
-          const code = (msg.roomCode || '').toUpperCase();
+          const code = (msg.roomCode || meta.roomCode || '').toUpperCase();
           const session = sessions.get(code);
-          if (!session || meta.role !== 'host') return;
+          if (!session) return;
+          meta.roomCode = code;
+          meta.role = 'host';
 
           session.status = 'lobby';
           session.currentQuestionIndex = 0;
@@ -2323,12 +2400,19 @@ wss.on('connection', (ws: WebSocket) => {
           meta.deviceId = msg.deviceId;
 
           if (msg.teamId && session.teams[msg.teamId]) {
+            const wasOffline = !session.teams[msg.teamId].online;
             session.teams[msg.teamId].online = true;
             session.teams[msg.teamId].lastSeen = Date.now();
             broadcastToRoom(code, {
               type: 'team_presence_changed',
               data: { teamId: msg.teamId, online: true },
             }, ws);
+            if (wasOffline) {
+              broadcastToRoom(code, {
+                type: 'teams_updated',
+                data: { roomCode: code, teams: session.teams },
+              });
+            }
           }
 
           if (meta.role === 'host') {
@@ -2353,12 +2437,13 @@ wss.on('connection', (ws: WebSocket) => {
           const teamId = msg.teamId || meta.teamId;
           const session = sessions.get(code);
 
-          if (session && teamId && session.teams[teamId]) {
+          meta.teamId = undefined;
+          meta.roomCode = undefined;
+          meta.role = undefined;
+
+          if (session && teamId && session.teams[teamId] && !hasOtherActiveSocketForTeam(code, teamId, ws)) {
             session.teams[teamId].online = false;
             session.teams[teamId].lastSeen = Date.now();
-            meta.teamId = undefined;
-            meta.roomCode = undefined;
-            meta.role = undefined;
 
             broadcastToRoom(code, {
               type: 'team_presence_changed',
@@ -2373,14 +2458,31 @@ wss.on('connection', (ws: WebSocket) => {
         }
 
         // ----------------------------------------------------
-        // PLAYER: HEARTBEAT (Every 3-4s to keep connection alive)
+        // HOST & PLAYER: HEARTBEAT (Every 3-4s to keep connection alive)
         // ----------------------------------------------------
+        case 'host:heartbeat': {
+          const code = (msg.roomCode || meta.roomCode || '').toUpperCase();
+          meta.isAlive = true;
+          meta.missedPings = 0;
+          if (code && sessions.has(code)) {
+            meta.roomCode = code;
+            meta.role = 'host';
+          }
+          break;
+        }
+
         case 'player:heartbeat': {
           const code = (msg.roomCode || meta.roomCode || '').toUpperCase();
           const teamId = msg.teamId || meta.teamId;
           const session = sessions.get(code);
 
           meta.isAlive = true;
+          meta.missedPings = 0;
+          if (code) meta.roomCode = code;
+          if (teamId) {
+            meta.teamId = teamId;
+            meta.role = 'player';
+          }
 
           if (session && teamId && session.teams[teamId]) {
             const team = session.teams[teamId];
@@ -2392,6 +2494,10 @@ wss.on('connection', (ws: WebSocket) => {
               broadcastToRoom(code, {
                 type: 'team_presence_changed',
                 data: { teamId, online: true },
+              });
+              broadcastToRoom(code, {
+                type: 'teams_updated',
+                data: { roomCode: code, teams: session.teams },
               });
               broadcastToRoom(code, {
                 type: 'session_updated',
@@ -2410,6 +2516,8 @@ wss.on('connection', (ws: WebSocket) => {
           const { teamId, set } = msg;
           const session = sessions.get(code);
           if (!session || !session.isDualMode) return;
+          meta.roomCode = code;
+          meta.role = 'host';
           if (!session.teamAssignments) session.teamAssignments = {};
           if (set === 'A' || set === 'B') {
             session.teamAssignments[teamId] = set;
@@ -2426,6 +2534,8 @@ wss.on('connection', (ws: WebSocket) => {
           const { assignments } = msg;
           const session = sessions.get(code);
           if (!session || !session.isDualMode || !assignments) return;
+          meta.roomCode = code;
+          meta.role = 'host';
           if (!session.teamAssignments) session.teamAssignments = {};
           for (const [tId, setVal] of Object.entries(assignments as Record<string, 'A' | 'B'>)) {
             if (setVal === 'A' || setVal === 'B') {
@@ -2445,7 +2555,9 @@ wss.on('connection', (ws: WebSocket) => {
         case 'host:update_room_settings': {
           const code = (msg.roomCode || meta.roomCode || '').toUpperCase();
           const session = sessions.get(code);
-          if (session && meta.role === 'host' && msg.settings) {
+          if (session && msg.settings) {
+            meta.roomCode = code;
+            meta.role = 'host';
             session.settings = {
               ...session.settings,
               ...msg.settings,
@@ -2468,7 +2580,9 @@ wss.on('connection', (ws: WebSocket) => {
           const teamId = msg.teamId;
           const session = sessions.get(code);
 
-          if (session && meta.role === 'host' && teamId && session.teams[teamId]) {
+          if (session && teamId && session.teams[teamId]) {
+            meta.roomCode = code;
+            meta.role = 'host';
             delete session.teams[teamId];
             broadcastSessionState(session, code);
             broadcastToRoom(code, {
@@ -2486,7 +2600,9 @@ wss.on('connection', (ws: WebSocket) => {
           const code = (msg.roomCode || meta.roomCode || '').toUpperCase();
           clearQuestionTimer(code);
           const session = sessions.get(code);
-          if (session && meta.role === 'host') {
+          if (session) {
+            meta.roomCode = code;
+            meta.role = 'host';
             broadcastToRoom(code, {
               type: 'game_ended',
               data: { reason: 'terminated_by_host', message: 'Cô giáo đã kết thúc phiên học.' },
@@ -2509,7 +2625,12 @@ wss.on('connection', (ws: WebSocket) => {
     const meta = socketMap.get(ws);
     if (meta && meta.roomCode && meta.teamId) {
       const session = sessions.get(meta.roomCode);
-      if (session && session.teams[meta.teamId]) {
+      // Only mark team offline if there is NO other open socket for this team
+      if (
+        session &&
+        session.teams[meta.teamId] &&
+        !hasOtherActiveSocketForTeam(meta.roomCode, meta.teamId, ws)
+      ) {
         session.teams[meta.teamId].online = false;
         session.teams[meta.teamId].lastSeen = Date.now();
         broadcastToRoom(meta.roomCode, {
@@ -2547,6 +2668,24 @@ app.get('/api/session/:roomCode', (req: Request, res: Response) => {
     return res.status(404).json({ error: 'Session not found' });
   }
   const targetTeamId = (req.query.teamId as string) || undefined;
+  // Refresh team presence via HTTP polling so even if a student's WebSocket briefly drops,
+  // active HTTP polling keeps the team marked online on the teacher's screen!
+  if (targetTeamId && session.teams[targetTeamId]) {
+    const team = session.teams[targetTeamId];
+    const wasOffline = !team.online;
+    team.lastSeen = Date.now();
+    team.online = true;
+    if (wasOffline) {
+      broadcastToRoom(code, {
+        type: 'team_presence_changed',
+        data: { teamId: targetTeamId, online: true },
+      });
+      broadcastToRoom(code, {
+        type: 'teams_updated',
+        data: { roomCode: code, teams: session.teams },
+      });
+    }
+  }
   res.json({
     session: targetTeamId
       ? getSanitizedSessionForPlayer(session, targetTeamId)

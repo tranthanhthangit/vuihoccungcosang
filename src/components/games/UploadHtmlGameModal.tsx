@@ -58,7 +58,7 @@ export const UploadHtmlGameModal: React.FC<UploadHtmlGameModalProps> = ({
   const [description, setDescription] = useState<string>('Trò chơi tương tác HTML5 / ZIP dành cho các bé');
   const [category, setCategory] = useState<string>('Chữ cái');
   const [timeLimit, setTimeLimit] = useState<number>(0);
-  const [points, setPoints] = useState<number>(30);
+  const [points, setPoints] = useState<number>(1);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
@@ -717,10 +717,10 @@ function submitGameResult() {
   const c4Placed = Boolean(document.getElementById('placed-uw')?.contains(document.getElementById('c4')));
 
   const dragDetails = [
-    { cardId: 'c1', cardText: 'U · Chú bộ đội', letter: 'U', subtext: 'Chú bộ đội', targetZone: c1Placed ? 'Ô CHỮ U' : 'Chưa kéo', expectedZone: 'Ô CHỮ U', isCorrect: c1Placed, status: c1Placed ? 'correct' : 'unplaced', points: c1Placed ? 8 : 0 },
-    { cardId: 'c2', cardText: 'Ư · Bác sĩ thú y', letter: 'Ư', subtext: 'Bác sĩ thú y', targetZone: c2Placed ? 'Ô CHỮ Ư' : 'Chưa kéo', expectedZone: 'Ô CHỮ Ư', isCorrect: c2Placed, status: c2Placed ? 'correct' : 'unplaced', points: c2Placed ? 8 : 0 },
-    { cardId: 'c3', cardText: 'U · Thợ may', letter: 'U', subtext: 'Thợ may', targetZone: c3Placed ? 'Ô CHỮ U' : 'Chưa kéo', expectedZone: 'Ô CHỮ U', isCorrect: c3Placed, status: c3Placed ? 'correct' : 'unplaced', points: c3Placed ? 7 : 0 },
-    { cardId: 'c4', cardText: 'Ư · Kỹ sư công trình', letter: 'Ư', subtext: 'Kỹ sư công trình', targetZone: c4Placed ? 'Ô CHỮ Ư' : 'Chưa kéo', expectedZone: 'Ô CHỮ Ư', isCorrect: c4Placed, status: c4Placed ? 'correct' : 'unplaced', points: c4Placed ? 7 : 0 }
+    { cardId: 'c1', cardText: 'U · Chú bộ đội', letter: 'U', subtext: 'Chú bộ đội', targetZone: c1Placed ? 'Ô CHỮ U' : 'Chưa kéo', expectedZone: 'Ô CHỮ U', isCorrect: c1Placed, status: c1Placed ? 'correct' : 'unplaced', points: c1Placed ? 1 : 0 },
+    { cardId: 'c2', cardText: 'Ư · Bác sĩ thú y', letter: 'Ư', subtext: 'Bác sĩ thú y', targetZone: c2Placed ? 'Ô CHỮ Ư' : 'Chưa kéo', expectedZone: 'Ô CHỮ Ư', isCorrect: c2Placed, status: c2Placed ? 'correct' : 'unplaced', points: c2Placed ? 1 : 0 },
+    { cardId: 'c3', cardText: 'U · Thợ may', letter: 'U', subtext: 'Thợ may', targetZone: c3Placed ? 'Ô CHỮ U' : 'Chưa kéo', expectedZone: 'Ô CHỮ U', isCorrect: c3Placed, status: c3Placed ? 'correct' : 'unplaced', points: c3Placed ? 1 : 0 },
+    { cardId: 'c4', cardText: 'Ư · Kỹ sư công trình', letter: 'Ư', subtext: 'Kỹ sư công trình', targetZone: c4Placed ? 'Ô CHỮ Ư' : 'Chưa kéo', expectedZone: 'Ô CHỮ Ư', isCorrect: c4Placed, status: c4Placed ? 'correct' : 'unplaced', points: c4Placed ? 1 : 0 }
   ];
 
   const answersList = dragDetails.map(d => ({

@@ -303,13 +303,15 @@ async function main() {
       playerWs.on('message', (data) => playerMessages.push(JSON.parse(data.toString())));
 
       playerWs.send(JSON.stringify({
-        type: 'player:join_room',
+        type: 'player:join',
         roomCode,
         teamId: 'team1',
         deviceId: 'dev_smoke_test_html',
       }));
 
       await wait(300);
+      const joinAck = playerMessages.find((m) => m.type === 'join_success');
+      if (!joinAck) throw new Error('Player did not receive join_success in HTML game test');
 
       // Start game & question 0
       hostWs.send(JSON.stringify({ type: 'host:start_question', roomCode, questionIndex: 0 }));

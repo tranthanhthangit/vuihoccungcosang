@@ -65,7 +65,7 @@ export const GradeOpenEndedModal: React.FC<GradeOpenEndedModalProps> = ({
   const originalDrawing = openEnded?.annotatedDrawingDataUrl || openEnded?.drawingDataUrl || draft?.drawingDataUrl || '';
   const textContent = openEnded?.textAnswer || draft?.textAnswer || '';
 
-  const maxPoints = question?.points || 10;
+  const maxPoints = question?.points || 1;
   const isPending = !openEnded?.teacherGrade || openEnded?.teacherGrade === 'pending';
   const currentPoints = isPending ? maxPoints : (answer?.pointsAwarded !== undefined ? answer.pointsAwarded : maxPoints);
   const currentFeedback = isPending ? '' : (openEnded?.teacherFeedback || '');
@@ -297,7 +297,7 @@ export const GradeOpenEndedModal: React.FC<GradeOpenEndedModalProps> = ({
       ctx.font = 'bold 30px Arial, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('10đ', x, y);
+      ctx.fillText(`${maxPoints}đ`, x, y);
     } else if (stampType === 'check') {
       // Green checkmark
       ctx.beginPath();
@@ -652,9 +652,9 @@ export const GradeOpenEndedModal: React.FC<GradeOpenEndedModalProps> = ({
                       type="button"
                       onClick={() => handleAddStamp('10p')}
                       className="px-2 py-0.5 rounded-lg bg-rose-50 hover:bg-rose-100 border border-rose-300 text-rose-700 text-xs font-black"
-                      title="Đóng dấu 10 điểm đỏ"
+                      title={`Đóng dấu ${maxPoints} điểm đỏ`}
                     >
-                      10đ
+                      +{maxPoints}đ
                     </button>
                     <button
                       type="button"

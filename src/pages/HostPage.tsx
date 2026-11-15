@@ -128,14 +128,20 @@ export const HostPage: React.FC<HostPageProps> = ({
         const clonedAnswers = { ...prev.answers };
         const qAns = clonedAnswers[qIndex] ? { ...clonedAnswers[qIndex] } : {};
 
-        // Merge answered status
+        // Merge answered status (including live drag-drop progress & timestamp updates)
         if (data.answeredTeams) {
           for (const [tId, val] of Object.entries(data.answeredTeams as Record<string, any>)) {
             if (!qAns[tId]) {
+              const assignedSet = prev.isDualMode
+                ? (prev.teamAssignments?.[tId] || prev.teams[tId]?.assignedSet || 'A')
+                : 'A';
+              const qObj = (prev.isDualMode && assignedSet === 'B' && prev.gameB)
+                ? prev.gameB.questions[qIndex]
+                : prev.game.questions[qIndex];
               qAns[tId] = {
                 sessionId: prev.sessionId,
                 questionIndex: qIndex,
-                questionId: prev.game.questions[qIndex]?.id || '',
+                questionId: qObj?.id || '',
                 teamId: tId,
                 teamName: prev.teams[tId]?.teamName || tId,
                 answerId: '',
@@ -144,6 +150,15 @@ export const HostPage: React.FC<HostPageProps> = ({
                 responseTimeMs: 0,
                 isCorrect: false,
                 pointsAwarded: 0,
+                placedCount: val.placedCount,
+                totalItems: val.totalItems,
+              };
+            } else {
+              qAns[tId] = {
+                ...qAns[tId],
+                submittedAt: val.submittedAt || qAns[tId].submittedAt,
+                placedCount: val.placedCount !== undefined ? val.placedCount : qAns[tId].placedCount,
+                totalItems: val.totalItems !== undefined ? val.totalItems : qAns[tId].totalItems,
               };
             }
           }
@@ -229,6 +244,44 @@ export const HostPage: React.FC<HostPageProps> = ({
       unsubError();
     };
   }, [targetRoomCode, initialGame, initialGameB, isDualMode, isNewSession]);
+
+  // Keep teacher/host screen awake during 15-minute classroom device setup and gameplay
+  useEffect(() => {
+    let wakeLock: any = null;
+    const requestWakeLock = async () => {
+      try {
+        if ('wakeLock' in navigator && document.visibilityState === 'visible') {
+          wakeLock = await (navigator as any).wakeLock.request('screen');
+        }
+      } catch {
+        // Ignore if browser does not support or denies WakeLock
+      }
+    };
+    requestWakeLock();
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        requestWakeLock();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (wakeLock) {
+        try {
+          wakeLock.release();
+        } catch {}
+      }
+    };
+  }, []);
+
+  // Periodic host sync fallback so team presence and answers stay 100% accurate
+  useEffect(() => {
+    if (!session?.roomCode || session.status === 'ended') return;
+    const syncTimer = window.setInterval(() => {
+      realtime.requestSync(session.roomCode, 'host');
+    }, 4000);
+    return () => clearInterval(syncTimer);
+  }, [session?.roomCode, session?.status]);
 
   // Host Action Handlers
   const handleKickTeam = useCallback((teamId: string) => {
@@ -452,7 +505,11 @@ export const HostPage: React.FC<HostPageProps> = ({
                 {session.status === 'lobby'
                   ? 'Phòng chờ'
                   : session.questionStatus === 'active'
-                  ? `Câu ${session.currentQuestionIndex + 1} / ${session.game.questions.length}`
+                  ? `Câu ${session.currentQuestionIndex + 1} / ${
+                      session.isDualMode && session.gameB
+                        ? Math.max(session.game.questions.length, session.gameB.questions.length)
+                        : session.game.questions.length
+                    }`
                   : session.questionStatus === 'results'
                   ? `Kết quả Câu ${session.currentQuestionIndex + 1}`
                   : 'Bảng xếp hạng'}

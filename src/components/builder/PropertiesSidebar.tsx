@@ -185,14 +185,15 @@ export const PropertiesSidebar: React.FC<PropertiesSidebarProps> = ({
                 <span>Điểm thưởng</span>
               </label>
               <select
-                value={currentQuestion.points || 10}
+                value={currentQuestion.points || 1}
                 onChange={(e) => onUpdateQuestion?.({ ...currentQuestion, points: Number(e.target.value) })}
                 className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none text-xs"
               >
+                <option value={1}>1 điểm (Mặc định)</option>
+                <option value={2}>2 điểm</option>
+                <option value={3}>3 điểm</option>
                 <option value={5}>5 điểm</option>
                 <option value={10}>10 điểm</option>
-                <option value={15}>15 điểm</option>
-                <option value={20}>20 điểm</option>
               </select>
             </div>
 

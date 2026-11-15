@@ -34,7 +34,7 @@ export class GameEngine {
         totalWrong: 0,
         placedCount: 0,
         totalRequired: 0,
-        pointsAwarded: question.points || 10,
+        pointsAwarded: question.points || 1,
         actions: [],
       };
     }
@@ -92,15 +92,9 @@ export class GameEngine {
     const isComplete = placedCount >= totalRequired && totalRequired > 0;
     const isAllCorrect = totalCorrect === totalRequired && totalWrong === 0 && totalRequired > 0;
 
-    // Calculate score
-    const pointsPerItem = Math.floor((question.points || 30) / Math.max(1, totalRequired));
-    let pointsAwarded = Math.max(0, totalCorrect * pointsPerItem);
-
-    if (isAllCorrect && speedBonus && question.timeLimit) {
-      const limitMs = question.timeLimit * 1000;
-      const speedFactor = Math.max(0, (limitMs - responseTimeMs) / limitMs);
-      pointsAwarded += Math.round(5 * speedFactor);
-    }
+    // Calculate score: 1 câu đúng là 1 điểm
+    const maxQPoints = question.points ?? 1;
+    const pointsAwarded = isAllCorrect ? maxQPoints : 0;
 
     return {
       isComplete,

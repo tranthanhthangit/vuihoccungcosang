@@ -100,6 +100,16 @@ export const TeamAnswersDetailModal: React.FC<TeamAnswersDetailModalProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
+    if (initialTeamId && teamsList.some(t => t.teamId === initialTeamId)) {
+      setSelectedTeamId(initialTeamId);
+    } else if (!selectedTeamId || !teamsList.some(t => t.teamId === selectedTeamId)) {
+      setSelectedTeamId(teamsList[0]?.teamId || '');
+    }
+    setSelectedQuestionFilter(initialQuestionIndex !== undefined ? initialQuestionIndex : 'all');
+  }, [isOpen, initialTeamId, initialQuestionIndex, session.teams]);
+
+  useEffect(() => {
+    if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (previewImage) {
@@ -282,11 +292,12 @@ export const TeamAnswersDetailModal: React.FC<TeamAnswersDetailModalProps> = ({
   }
 
   const detailedItems: DetailedItem[] = [];
+  const activeTeamId = currentTeam?.teamId || selectedTeamId;
 
   questions.forEach((q, qIdx) => {
     if (selectedQuestionFilter !== 'all' && selectedQuestionFilter !== qIdx) return;
 
-    const ans = session.answers?.[qIdx]?.[selectedTeamId];
+    const ans = session.answers?.[qIdx]?.[activeTeamId];
     const realQ = (ans?.questionId && (session.gameB?.questions.find(item => item.id === ans.questionId) || session.game.questions.find(item => item.id === ans.questionId)))
       || q;
 
@@ -330,21 +341,21 @@ export const TeamAnswersDetailModal: React.FC<TeamAnswersDetailModalProps> = ({
       const isMatch = Boolean(chosenLetter && correctLetter && chosenLetter.toLowerCase() === correctLetter.toLowerCase());
       // Tự chấm điểm tự động cho câu kéo thả ô chữ (không cần cô chấm thủ công)
       const isItemCorrect = Boolean(isMatch || ans?.isCorrect || ans?.openEnded?.teacherGrade === 'correct');
-      const pointsAwarded = isItemCorrect ? (realQ.points || 10) : 0;
+      const pointsAwarded = isItemCorrect ? (realQ.points || 1) : 0;
       if (isItemCorrect) totalTeamCorrectCount++;
 
       detailedItems.push({
         questionIndex: qIdx,
         questionTitle: realQ.title,
         questionType: 'Trò chơi kéo thả ô chữ',
-        questionPoints: realQ.points || 10,
+        questionPoints: realQ.points || 1,
         subQuestionText: realQ.explanation || 'Bé kéo chữ cái còn thiếu vào chỗ trống',
         chosenText: chosenLetter ? `Bé ghép chữ: "${chosenLetter}" (${formedWord})` : 'Chưa kéo chữ vào ô',
         correctText: `Chữ đúng: "${correctLetter}" (${realQ.targetWord || `${prefix}${correctLetter}${suffix}`})`,
         isCorrect: isItemCorrect,
         pointsAwarded,
         responseTimeMs: ans?.responseTimeMs,
-        summaryText: isItemCorrect ? 'Tự chấm: Đúng (+10đ)' : (chosenLetter ? 'Tự chấm: Chưa đúng' : 'Chưa ghép chữ'),
+        summaryText: isItemCorrect ? 'Tự chấm: Đúng (+1đ)' : (chosenLetter ? 'Tự chấm: Chưa đúng' : 'Chưa ghép chữ'),
         source: 'word_drag_drop',
         openEnded: ans?.openEnded,
         wordDragSummary: {
@@ -378,7 +389,7 @@ export const TeamAnswersDetailModal: React.FC<TeamAnswersDetailModalProps> = ({
         questionIndex: qIdx,
         questionTitle: realQ.title,
         questionType: 'Câu hỏi tự luận (Vẽ & Viết)',
-        questionPoints: realQ.points || 10,
+        questionPoints: realQ.points || 1,
         subQuestionText: 'Bé dùng bảng vẽ màu hoặc gõ chữ vào ô đáp án',
         chosenText: effectiveText ? `Đã gõ chữ: "${effectiveText}"` : (effectiveDrawing ? 'Đã vẽ hình tự luận' : 'Chưa nộp bài'),
         chosenImage: effectiveDrawing,
@@ -386,7 +397,7 @@ export const TeamAnswersDetailModal: React.FC<TeamAnswersDetailModalProps> = ({
         modelAnswer: realQ.modelAnswer,
         modelAnswerImage: realQ.modelAnswerImage || realQ.openEndedBgImage,
         isCorrect: Boolean(oe?.teacherGrade === 'correct'),
-        pointsAwarded: ans?.pointsAwarded ?? (oe?.teacherGrade === 'correct' ? (oe?.teacherPoints ?? realQ.points ?? 10) : 0),
+        pointsAwarded: ans?.pointsAwarded ?? (oe?.teacherGrade === 'correct' ? (oe?.teacherPoints ?? realQ.points ?? 1) : 0),
         responseTimeMs: ans?.responseTimeMs,
         summaryText: oe?.teacherFeedback?.trim() && oe?.teacherGrade && oe.teacherGrade !== 'pending'
           ? `Lời cô sửa bài: "${oe.teacherFeedback}"`
@@ -481,12 +492,12 @@ export const TeamAnswersDetailModal: React.FC<TeamAnswersDetailModalProps> = ({
           questionIndex: qIdx,
           questionTitle: q.title,
           questionType: 'Trò chơi kéo thẻ phân loại (Gói ZIP)',
-          questionPoints: q.points || 30,
+          questionPoints: q.points || 1,
           subQuestionText: htmlDet?.summary || 'Bé kéo các thẻ vào đúng vùng quy định',
           chosenText: `Đúng ${correctCards.length}/${totalCards} thẻ`,
           correctText: `Kéo đúng toàn bộ ${totalCards} thẻ vào vùng đích`,
           isCorrect: correctCards.length === totalCards && totalCards > 0,
-          pointsAwarded: ans?.pointsAwarded ?? (correctCards.length * Math.round((q.points || 30) / Math.max(totalCards, 1))),
+          pointsAwarded: ans?.pointsAwarded ?? (correctCards.length === totalCards && totalCards > 0 ? (q.points || 1) : 0),
           responseTimeMs: ans?.responseTimeMs,
           source: 'drag_drop',
           dragSummary: {
@@ -508,7 +519,7 @@ export const TeamAnswersDetailModal: React.FC<TeamAnswersDetailModalProps> = ({
             questionIndex: qIdx,
             questionTitle: q.title,
             questionType: 'Trò chơi tương tác (Gói ZIP)',
-            questionPoints: q.points || 30,
+            questionPoints: q.points || 1,
             turnIndex: itemIdx + 1,
             subQuestionText: item.question || `Lượt chơi ${itemIdx + 1}`,
             chosenText: item.chosenAnswer || 'Đã chọn hình',
@@ -516,7 +527,7 @@ export const TeamAnswersDetailModal: React.FC<TeamAnswersDetailModalProps> = ({
             correctText: item.correctAnswer || 'Đáp án mẫu',
             correctImage: item.correctImage,
             isCorrect: Boolean(item.isCorrect),
-            pointsAwarded: item.points !== undefined ? item.points : (item.isCorrect ? Math.round((q.points || 30) / Math.max(answersList.length, 1)) : 0),
+            pointsAwarded: item.points !== undefined ? item.points : (item.isCorrect ? (q.points || 1) : 0),
             summaryText: htmlDet?.summary,
             source: 'html_game',
           });
@@ -529,7 +540,7 @@ export const TeamAnswersDetailModal: React.FC<TeamAnswersDetailModalProps> = ({
             questionIndex: qIdx,
             questionTitle: q.title,
             questionType: 'Trò chơi tương tác (Gói ZIP)',
-            questionPoints: q.points || 30,
+            questionPoints: q.points || 1,
             turnIndex: hIdx + 1,
             subQuestionText: h.question || `Lượt chơi ${hIdx + 1}`,
             chosenText: h.choiceText || 'Đã bấm chọn',
@@ -537,7 +548,7 @@ export const TeamAnswersDetailModal: React.FC<TeamAnswersDetailModalProps> = ({
             correctText: h.correctText || 'Đáp án đúng',
             correctImage: h.correctChoiceImg,
             isCorrect: Boolean(h.isCorrect),
-            pointsAwarded: h.isCorrect ? Math.round((q.points || 30) / Math.max(history.length, 1)) : 0,
+            pointsAwarded: h.isCorrect ? (q.points || 1) : 0,
             summaryText: htmlDet?.summary,
             source: 'html_game',
           });
@@ -550,7 +561,7 @@ export const TeamAnswersDetailModal: React.FC<TeamAnswersDetailModalProps> = ({
           questionIndex: qIdx,
           questionTitle: q.title,
           questionType: 'Trò chơi gói ZIP / HTML5',
-          questionPoints: q.points || 30,
+          questionPoints: q.points || 1,
           chosenText: ans?.answerText || (ans ? 'Đã hoàn thành' : 'Chưa nộp kết quả'),
           correctText: 'Hoàn thành các thử thách trong trò chơi',
           isCorrect: Boolean(ans?.isCorrect),
@@ -618,7 +629,7 @@ export const TeamAnswersDetailModal: React.FC<TeamAnswersDetailModalProps> = ({
           targetZoneId: correctTarget?.id,
           isCorrect: Boolean(act && act.isCorrect),
           status: !act ? 'unplaced' : act.isCorrect ? 'correct' : 'wrong',
-          points: act?.isCorrect ? Math.round((realQ.points || 20) / Math.max(draggableElements.length, 1)) : 0,
+          points: act?.isCorrect ? (realQ.points || 1) : 0,
         };
 
         if (!act) {
@@ -699,12 +710,12 @@ export const TeamAnswersDetailModal: React.FC<TeamAnswersDetailModalProps> = ({
         questionIndex: qIdx,
         questionTitle: realQ.title,
         questionType: 'Trò chơi kéo thả phân loại',
-        questionPoints: realQ.points || 20,
+        questionPoints: realQ.points || 1,
         subQuestionText: realQ.explanation || 'Bé kéo các thẻ vào đúng ô quy định',
         chosenText: ans ? `Đúng ${correctCards.length}/${totalCards} thẻ` : 'Chưa nộp bài',
         correctText: `Xếp đúng toàn bộ ${totalCards} thẻ vào ô quy định`,
         isCorrect: isQuestionCorrect,
-        pointsAwarded: ans?.pointsAwarded ?? (correctCards.length * Math.round((realQ.points || 20) / Math.max(totalCards, 1))),
+        pointsAwarded: ans?.pointsAwarded ?? (isQuestionCorrect ? (realQ.points || 1) : 0),
         responseTimeMs: ans?.responseTimeMs,
         source: 'drag_drop',
         dragSummary: {
@@ -758,7 +769,7 @@ export const TeamAnswersDetailModal: React.FC<TeamAnswersDetailModalProps> = ({
         questionIndex: qIdx,
         questionTitle: q.title,
         questionType: 'Câu hỏi trắc nghiệm',
-        questionPoints: q.points || 10,
+        questionPoints: q.points || 1,
         chosenText: ans ? (ans.answerText || (chosenOpts.length > 0 ? chosenOpts.map(o => o.text).join(', ') : 'Đã chọn')) : 'Chưa chọn đáp án',
         chosenImage: chosenOpts[0]?.imageUrl,
         chosenItems: chosenItems.length > 0 ? chosenItems : undefined,
@@ -1792,7 +1803,7 @@ export const TeamAnswersDetailModal: React.FC<TeamAnswersDetailModalProps> = ({
                                 ? 'bg-rose-50 text-rose-800 border border-rose-200'
                                 : 'bg-amber-50 text-amber-800 border border-amber-200'
                             }`}>
-                              {item.openEnded?.teacherGrade === 'correct' ? '✅ Đã chấm Đúng (+10đ)' : item.openEnded?.teacherGrade === 'wrong' ? '❌ Đã chấm Chưa đúng (0đ)' : '⏳ Chờ cô sửa lỗi & chấm'}
+                              {item.openEnded?.teacherGrade === 'correct' ? `✅ Đã chấm Đúng (+${item.pointsAwarded || item.questionPoints || 1}đ)` : item.openEnded?.teacherGrade === 'wrong' ? '❌ Đã chấm Chưa đúng (0đ)' : '⏳ Chờ cô sửa lỗi & chấm'}
                             </span>
                           </div>
 

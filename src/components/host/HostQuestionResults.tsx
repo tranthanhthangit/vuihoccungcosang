@@ -110,7 +110,7 @@ export const HostQuestionResults: React.FC<HostQuestionResultsProps> = ({
 
   const handleGradeSingleWordDrag = (teamId: string, isCorrect: boolean) => {
     sounds.playCorrect();
-    const maxPts = currentQ?.points || 10;
+    const maxPts = currentQ?.points || 1;
     const pts = isCorrect ? maxPts : 0;
     const feedback = isCorrect ? 'Bé đã ghép chữ rất chính xác!' : 'Bé chú ý xem đáp án đúng của cô nhé!';
 
@@ -139,7 +139,7 @@ export const HostQuestionResults: React.FC<HostQuestionResultsProps> = ({
   const handleAutoGradeAllWordDrag = () => {
     sounds.playFanfare();
     const correctLetter = (currentQ?.missingLetters?.[0] || 'm').trim().toLowerCase();
-    const maxPts = currentQ?.points || 10;
+    const maxPts = currentQ?.points || 1;
 
     teamsList.forEach(t => {
       const ans = currentAnswers[t.teamId];
@@ -876,7 +876,7 @@ export const HostQuestionResults: React.FC<HostQuestionResultsProps> = ({
                             const teacherGrade = ans?.openEnded?.teacherGrade;
                             const isPending = !teacherGrade || teacherGrade === 'pending';
                             const isCorrectGrade = teacherGrade === 'correct';
-                            const pts = ans?.pointsAwarded !== undefined ? ans.pointsAwarded : (currentQ?.points || 10);
+                            const pts = ans?.pointsAwarded !== undefined ? ans.pointsAwarded : (currentQ?.points || 1);
 
                             if (isPending) {
                               return (
@@ -1023,7 +1023,7 @@ export const HostQuestionResults: React.FC<HostQuestionResultsProps> = ({
                             type="button"
                             onClick={() => handleGradeSingleWordDrag(team.teamId, true)}
                             className="px-2.5 py-1 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-black flex items-center gap-1 transition cursor-pointer active:scale-95"
-                            title="Chấm đúng cho bé (+10đ)"
+                            title={`Chấm đúng cho bé (+${currentQ?.points || 1}đ)`}
                           >
                             <Check className="w-3.5 h-3.5" />
                             <span>Đúng</span>

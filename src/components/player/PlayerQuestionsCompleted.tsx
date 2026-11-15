@@ -17,8 +17,12 @@ export const PlayerQuestionsCompleted: React.FC<PlayerQuestionsCompletedProps> =
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
   const preset = TEAM_PRESETS.find((p) => p.id === team.teamId);
   const teamScore = session.teams[team.teamId]?.score || 0;
-  const totalQuestions = session.game.questions.length;
-  const assignedTitle = session.assignedSetTitle || (session.myAssignedSet === 'B' ? 'Bộ câu hỏi 2' : 'Bộ câu hỏi 1');
+  const myAssignedSet = team.assignedSet || session.teamAssignments?.[team.teamId] || session.myAssignedSet || 'A';
+  const effectiveGame = session.isDualMode
+    ? (myAssignedSet === 'B' ? (session.gameB || session.game) : (session.gameA || session.game))
+    : session.game;
+  const totalQuestions = effectiveGame?.questions?.length || session.game.questions.length;
+  const assignedTitle = session.assignedSetTitle || (myAssignedSet === 'B' ? 'Bộ câu hỏi 2' : 'Bộ câu hỏi 1');
 
   useEffect(() => {
     // Play celebratory fanfare on mount

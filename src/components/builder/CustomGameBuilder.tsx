@@ -142,7 +142,7 @@ export const CustomGameBuilder: React.FC<CustomGameBuilderProps> = ({
         readQuestionAudio: true,
         timeLimit: 0,
         noTimeLimit: true,
-        points: 10,
+        points: 1,
         boxSize: 'lg',
         layoutColumns: 2,
         options: [
@@ -174,6 +174,7 @@ export const CustomGameBuilder: React.FC<CustomGameBuilderProps> = ({
   const bgImageInputRef = useRef<HTMLInputElement>(null);
   const optionImageInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const [newDistractorInput, setNewDistractorInput] = useState('');
+  const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
   useEffect(() => {
     setSavedInteractiveQuestions(getSavedInteractiveQuestions());
@@ -217,7 +218,7 @@ export const CustomGameBuilder: React.FC<CustomGameBuilderProps> = ({
       readQuestionAudio: true,
       timeLimit: 0,
       noTimeLimit: true,
-      points: currentQ?.points || 10,
+      points: currentQ?.points || 1,
       boxSize: currentQ?.boxSize || 'lg',
       layoutColumns: currentQ?.layoutColumns || 2,
       options: [
@@ -238,7 +239,7 @@ export const CustomGameBuilder: React.FC<CustomGameBuilderProps> = ({
       id: 'cq_oe_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
       title: 'Bé hãy vẽ hình hoặc viết đáp án vào ô trống nhé!',
       type: 'open_ended',
-      points: 10,
+      points: 1,
       timeLimit: 0,
       noTimeLimit: true,
       readQuestionAudio: true,
@@ -266,7 +267,7 @@ export const CustomGameBuilder: React.FC<CustomGameBuilderProps> = ({
       explanation: 'Chữ "m" ghép với vần "iệng" tạo thành từ "miệng"!',
       timeLimit: 0,
       noTimeLimit: true,
-      points: 10,
+      points: 1,
       readQuestionAudio: true,
       options: [
         { id: 'opt_c', text: 'm', isCorrect: true },
@@ -363,7 +364,7 @@ export const CustomGameBuilder: React.FC<CustomGameBuilderProps> = ({
         type: 'drag_drop',
         timeLimit: 0,
         noTimeLimit: true,
-        points: latestCreated.points || 10,
+        points: latestCreated.points || 1,
         explanation: latestCreated.explanation || '',
         readQuestionAudio: true,
         options: [],
@@ -378,7 +379,7 @@ export const CustomGameBuilder: React.FC<CustomGameBuilderProps> = ({
         type: 'drag_drop',
         timeLimit: 0,
         noTimeLimit: true,
-        points: 10,
+        points: 1,
         readQuestionAudio: true,
       };
     }
@@ -395,7 +396,7 @@ export const CustomGameBuilder: React.FC<CustomGameBuilderProps> = ({
       type: 'drag_drop',
       timeLimit: 0,
       noTimeLimit: true,
-      points: savedQ.points || 10,
+      points: savedQ.points || 1,
       explanation: savedQ.explanation || '',
       readQuestionAudio: true,
       options: [],
@@ -424,9 +425,11 @@ export const CustomGameBuilder: React.FC<CustomGameBuilderProps> = ({
   // Delete question
   const handleDeleteQuestion = (idx: number) => {
     if (questions.length <= 1) {
-      alert('Trò chơi cần có ít nhất 1 câu hỏi.');
+      setErrorBanner('Trò chơi cần có ít nhất 1 câu hỏi.');
+      sounds.playWrong();
       return;
     }
+    setErrorBanner(null);
     sounds.playClick();
     const nextList = questions.filter((_, i) => i !== idx);
     setQuestions(nextList);
@@ -619,6 +622,19 @@ export const CustomGameBuilder: React.FC<CustomGameBuilderProps> = ({
           </button>
         </div>
       </header>
+
+      {errorBanner && (
+        <div className="bg-rose-50 border-b border-rose-200 px-4 py-2 flex items-center justify-between text-xs font-bold text-rose-700 shrink-0">
+          <span>⚠️ {errorBanner}</span>
+          <button
+            type="button"
+            onClick={() => setErrorBanner(null)}
+            className="text-rose-500 hover:text-rose-800 px-2 py-0.5 rounded"
+          >
+            Đóng
+          </button>
+        </div>
+      )}
 
       {/* Main Workspace Body */}
       <div className="flex-1 flex overflow-hidden">
@@ -953,15 +969,15 @@ export const CustomGameBuilder: React.FC<CustomGameBuilderProps> = ({
               <div className="flex items-center gap-1">
                 <Award className="w-3.5 h-3.5 text-amber-500" />
                 <select
-                  value={currentQ?.points || 10}
+                  value={currentQ?.points || 1}
                   onChange={(e) => handleUpdateCurrentQ({ points: Number(e.target.value) })}
                   className="text-xs font-black bg-slate-100 text-slate-700 px-2 py-1 rounded-lg border border-slate-200 cursor-pointer"
                 >
+                  <option value={1}>1 điểm (Mặc định)</option>
+                  <option value={2}>2 điểm</option>
+                  <option value={3}>3 điểm</option>
                   <option value={5}>5 điểm</option>
                   <option value={10}>10 điểm</option>
-                  <option value={15}>15 điểm</option>
-                  <option value={20}>20 điểm</option>
-                  <option value={50}>50 điểm</option>
                 </select>
               </div>
 
@@ -1604,7 +1620,7 @@ export const CustomGameBuilder: React.FC<CustomGameBuilderProps> = ({
                                       title: iq.title,
                                       canvasConfig: JSON.parse(JSON.stringify(iq.canvasConfig)),
                                       explanation: iq.explanation,
-                                      points: iq.points || 10,
+                                      points: iq.points || 1,
                                     });
                                   }}
                                   className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-black flex items-center justify-center gap-1 transition active:scale-95 cursor-pointer shadow-xs ${
@@ -2490,7 +2506,7 @@ export const CustomGameBuilder: React.FC<CustomGameBuilderProps> = ({
                   title: createdQ.title,
                   canvasConfig: JSON.parse(JSON.stringify(createdQ.canvasConfig)),
                   explanation: createdQ.explanation,
-                  points: createdQ.points || 10,
+                  points: createdQ.points || 1,
                 });
               }
 

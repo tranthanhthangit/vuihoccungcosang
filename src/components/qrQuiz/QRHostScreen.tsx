@@ -8,6 +8,13 @@ import {
 } from '../../types/qrQuiz';
 import { saveQRSessionHistory } from '../../services/qrStorage';
 import QRCode from 'qrcode';
+import {
+  speakQuestionWithOptions,
+  speakOption,
+  stopSpeaking,
+  subscribeSpeakingState,
+  unlockSpeechAudio,
+} from '../../utils/speechVoice';
 
 interface QRHostScreenProps {
   roomCode: string;
@@ -46,16 +53,44 @@ export const QRHostScreen: React.FC<QRHostScreenProps> = ({
   // Phone connection QR modal
   const [isPhoneConnectModalOpen, setIsPhoneConnectModalOpen] = useState(false);
   const [phoneConnectQrDataUrl, setPhoneConnectQrDataUrl] = useState('');
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
-  // Audio & speech
+  useEffect(() => {
+    const unsub = subscribeSpeakingState(setIsSpeaking);
+    return () => {
+      unsub();
+      stopSpeaking();
+    };
+  }, []);
+
+  // Stop speaking when question changes
+  useEffect(() => {
+    stopSpeaking();
+  }, [currentQuestionIndex]);
+
+  // Audio & speech for reading question AND all 4 options
   const speakQuestion = () => {
-    if (!currentQuestion || !('speechSynthesis' in window)) return;
-    window.speechSynthesis.cancel();
-    const text = currentQuestion.prompt || currentQuestion.title;
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'vi-VN';
-    u.rate = 0.9;
-    window.speechSynthesis.speak(u);
+    unlockSpeechAudio();
+    if (isSpeaking) {
+      stopSpeaking();
+      return;
+    }
+    if (!currentQuestion) return;
+
+    const optA = currentQuestion.options?.A?.text || currentQuestion.optionA || (currentQuestion.options?.A?.imageUrl ? 'Hình ảnh đáp án A' : '');
+    const optB = currentQuestion.options?.B?.text || currentQuestion.optionB || (currentQuestion.options?.B?.imageUrl ? 'Hình ảnh đáp án B' : '');
+    const optC = currentQuestion.options?.C?.text || currentQuestion.optionC || (currentQuestion.options?.C?.imageUrl ? 'Hình ảnh đáp án C' : '');
+    const optD = currentQuestion.options?.D?.text || currentQuestion.optionD || (currentQuestion.options?.D?.imageUrl ? 'Hình ảnh đáp án D' : '');
+
+    speakQuestionWithOptions(
+      currentQuestion.prompt || currentQuestion.title,
+      [
+        { text: optA },
+        { text: optB },
+        { text: optC },
+        { text: optD },
+      ]
+    );
   };
 
   // Generate phone connect QR
@@ -179,10 +214,15 @@ export const QRHostScreen: React.FC<QRHostScreenProps> = ({
                 <button
                   type="button"
                   onClick={speakQuestion}
-                  className="w-12 h-12 rounded-2xl bg-amber-400 hover:bg-amber-300 text-slate-950 flex items-center justify-center text-xl font-bold shadow-md active:scale-95 transition flex-shrink-0"
-                  title="Cô đọc câu hỏi cho bé"
+                  className={`px-4 py-2.5 rounded-2xl flex items-center gap-2 font-black text-xs sm:text-sm shadow-md active:scale-95 transition flex-shrink-0 cursor-pointer ${
+                    isSpeaking
+                      ? 'bg-rose-500 text-white animate-pulse shadow-rose-900/50'
+                      : 'bg-amber-400 hover:bg-amber-300 text-slate-950'
+                  }`}
+                  title="Cô đọc câu hỏi và các đáp án A, B, C, D cho các bé nghe"
                 >
-                  🔊
+                  <span className="text-base sm:text-lg">🔊</span>
+                  <span>{isSpeaking ? 'Dừng đọc' : 'Đọc câu hỏi & đáp án'}</span>
                 </button>
               </div>
 
@@ -200,15 +240,22 @@ export const QRHostScreen: React.FC<QRHostScreenProps> = ({
               {/* 4 Answer Options */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                 {(['A', 'B', 'C', 'D'] as const).map((letter) => {
-                  const optText = currentQuestion.options?.[letter]?.text || (currentQuestion as any)[`option${letter}`] || '—';
+                  const optText = currentQuestion.options?.[letter]?.text || (currentQuestion as any)[`option${letter}`] || '';
+                  const optImageUrl = currentQuestion.options?.[letter]?.imageUrl;
                   const theme = optionTheme[letter];
                   const isCorrect = currentQuestion.correctAnswer === letter;
                   const countPicked = stats.counts[letter];
+                  const hasAnyOptionImages = Boolean(
+                    currentQuestion.options?.A?.imageUrl ||
+                      currentQuestion.options?.B?.imageUrl ||
+                      currentQuestion.options?.C?.imageUrl ||
+                      currentQuestion.options?.D?.imageUrl
+                  );
 
                   return (
                     <div
                       key={letter}
-                      className={`relative p-4 rounded-2xl border transition-all flex items-center gap-3 overflow-hidden ${
+                      className={`relative p-3.5 sm:p-4 rounded-2xl border transition-all flex flex-col gap-2.5 overflow-hidden ${
                         isRevealed && isCorrect
                           ? 'bg-emerald-950/80 border-emerald-400 ring-2 ring-emerald-400 shadow-lg'
                           : isRevealed && !isCorrect
@@ -216,56 +263,69 @@ export const QRHostScreen: React.FC<QRHostScreenProps> = ({
                           : 'bg-slate-900/80 border-white/10'
                       }`}
                     >
-                      {/* Letter Badge */}
-                      <div
-                        className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg text-white shadow-sm flex-shrink-0 ${
-                          isRevealed && isCorrect ? 'bg-emerald-500' : theme.bg
-                        }`}
-                      >
-                        {letter}
-                      </div>
-
-                      {/* Text */}
-                      <div className="min-w-0 flex-1">
-                        <p
-                          className={`text-sm sm:text-base font-bold leading-tight ${
-                            isRevealed && isCorrect ? 'text-emerald-300' : 'text-slate-100'
-                          }`}
-                        >
-                          {optText}
-                        </p>
-                      </div>
-
-                      {/* Revealed count & Correct tick */}
-                      {isRevealed && (
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          {isCorrect && (
-                            <span className="text-xl text-emerald-400 font-black animate-bounce">
-                              ✓
-                            </span>
-                          )}
-                          <span className="text-xs px-2 py-1 rounded-lg bg-white/10 text-white font-mono font-bold">
-                            {countPicked} bé
-                          </span>
+                      {hasAnyOptionImages && optImageUrl && (
+                        <div className="w-full h-32 sm:h-36 rounded-xl bg-slate-950/75 border border-white/10 overflow-hidden flex items-center justify-center p-1.5">
+                          <img
+                            src={optImageUrl}
+                            alt={`Hình đáp án ${letter}`}
+                            className="max-w-full max-h-full object-contain rounded-lg"
+                          />
                         </div>
                       )}
+
+                      <div className="flex items-center gap-3">
+                        {/* Letter Badge */}
+                        <div
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg text-white shadow-sm flex-shrink-0 ${
+                            isRevealed && isCorrect ? 'bg-emerald-500' : theme.bg
+                          }`}
+                        >
+                          {letter}
+                        </div>
+
+                        {/* Text */}
+                        <div className="min-w-0 flex-1">
+                          <p
+                            className={`text-sm sm:text-base font-bold leading-tight ${
+                              isRevealed && isCorrect ? 'text-emerald-300' : 'text-slate-100'
+                            }`}
+                          >
+                            {optText || (optImageUrl ? `Phương án ${letter}` : '—')}
+                          </p>
+                        </div>
+
+                        {/* Individual Option Audio Reader Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            unlockSpeechAudio();
+                            speakOption(letter, optText || (optImageUrl ? `Hình ảnh đáp án ${letter}` : ''));
+                          }}
+                          className="p-2 rounded-xl bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white transition cursor-pointer flex-shrink-0"
+                          title={`Nghe đọc đáp án ${letter}`}
+                        >
+                          🔊
+                        </button>
+
+                        {/* Revealed count & Correct tick */}
+                        {isRevealed && (
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {isCorrect && (
+                              <span className="text-xl text-emerald-400 font-black animate-bounce">
+                                ✓
+                              </span>
+                            )}
+                            <span className="text-xs px-2 py-1 rounded-lg bg-white/10 text-white font-mono font-bold">
+                              {countPicked} bé
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
               </div>
-
-              {/* Revealed Explanation */}
-              {isRevealed && currentQuestion.explanation && (
-                <div className="p-4 rounded-2xl bg-indigo-950/70 border border-indigo-400/40 text-indigo-200 text-sm flex items-start gap-3 animate-in fade-in">
-                  <span className="text-xl">💡</span>
-                  <div>
-                    <h5 className="font-bold text-white text-xs uppercase tracking-wider">
-                      Lời cô giải thích:
-                    </h5>
-                    <p className="mt-1 leading-relaxed">{currentQuestion.explanation}</p>
-                  </div>
-                </div>
-              )}
 
               {/* Big Classroom Host Actions */}
               <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-white/10">

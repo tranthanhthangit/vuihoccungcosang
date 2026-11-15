@@ -160,11 +160,6 @@ export const HostLobby: React.FC<HostLobbyProps> = ({
     setTimeout(() => setCopied(false), 2500);
   };
 
-  const handleOpenTestTab = () => {
-    sounds.playClick();
-    window.open(`${effectiveBaseUrl}/join?room=${session.roomCode}`, '_blank', 'noopener,noreferrer');
-  };
-
   const connectedTeamsList = Object.values(session.teams);
   const maxTeams = session.settings.maxTeams || 12;
 
@@ -373,16 +368,19 @@ export const HostLobby: React.FC<HostLobbyProps> = ({
               </button>
             </div>
 
-            {/* Quick Test Launch Button */}
+            {/* Quick Test Launch Link */}
             <div className="pt-1">
-              <button
-                onClick={handleOpenTestTab}
+              <a
+                href={joinUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => sounds.playClick()}
                 className="w-full px-4 py-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-700 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 border border-slate-200 cursor-pointer active:scale-95"
                 title="Mở tab mới trên máy tính để thử nghiệm giao diện học sinh"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
                 <span>Mở 1 tab học sinh để thử nghiệm</span>
-              </button>
+              </a>
             </div>
           </div>
 

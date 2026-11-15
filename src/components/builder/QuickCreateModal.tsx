@@ -137,7 +137,7 @@ export const QuickCreateModal: React.FC<QuickCreateModalProps> = ({
         sourceId: cardId,
         targetId,
         isCorrect: true,
-        points: 5,
+        points: 1,
       });
     }
 
@@ -147,7 +147,7 @@ export const QuickCreateModal: React.FC<QuickCreateModalProps> = ({
       type: 'drag_drop',
       timeLimit: 0,
       noTimeLimit: true,
-      points: cardCount * 5,
+      points: 1,
       explanation: `Bé đã phân biệt xuất sắc chữ ${targetA} và chữ ${targetB}!`,
       options: [],
       canvasConfig: {

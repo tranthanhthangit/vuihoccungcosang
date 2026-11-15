@@ -50,19 +50,21 @@ export const PlayerQuestion: React.FC<PlayerQuestionProps> = ({
   selectedOptIdsRef.current = selectedOptIds;
   const hasSubmittedRef = useRef(hasSubmitted);
   hasSubmittedRef.current = hasSubmitted;
+  const onSubmitAnswerRef = useRef(onSubmitAnswer);
+  onSubmitAnswerRef.current = onSubmitAnswer;
 
-  // Auto-submit selected option when unmounted if not submitted yet
+  // Auto-submit selected option ONLY when genuinely unmounted if not submitted yet
   useEffect(() => {
     return () => {
       if (!hasSubmittedRef.current) {
         if (selectedOptIdsRef.current.length > 0) {
-          onSubmitAnswer(selectedOptIdsRef.current.join(','), selectedOptIdsRef.current);
+          onSubmitAnswerRef.current(selectedOptIdsRef.current.join(','), selectedOptIdsRef.current);
         } else if (selectedOptIdRef.current) {
-          onSubmitAnswer(selectedOptIdRef.current, [selectedOptIdRef.current]);
+          onSubmitAnswerRef.current(selectedOptIdRef.current, [selectedOptIdRef.current]);
         }
       }
     };
-  }, [onSubmitAnswer]);
+  }, []);
 
   useEffect(() => {
     if (existingAnswer) {
@@ -188,10 +190,10 @@ export const PlayerQuestion: React.FC<PlayerQuestionProps> = ({
                 ? 'bg-rose-500 text-white animate-pulse shadow-md'
                 : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
             }`}
-            title="Đọc câu hỏi to rõ ràng cho các bé nghe"
+            title="Đọc câu hỏi và các đáp án to rõ ràng cho các bé nghe"
           >
             {isSpeaking ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-            <span>{isSpeaking ? 'Dừng đọc' : '🔊 Đọc câu hỏi'}</span>
+            <span>{isSpeaking ? 'Dừng đọc' : '🔊 Đọc câu hỏi & đáp án'}</span>
           </button>
         )}
 

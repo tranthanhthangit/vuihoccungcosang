@@ -58,10 +58,13 @@ export const PlayerJoin: React.FC<PlayerJoinProps> = ({
   const [customTeamName, setCustomTeamName] = useState<string>('');
   const [deviceId] = useState(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('vuihoc_device_id');
-      if (saved) return saved;
+      const savedTab = sessionStorage.getItem('vuihoc_device_id');
+      if (savedTab) return savedTab;
       const created = generateDeviceId();
-      localStorage.setItem('vuihoc_device_id', created);
+      sessionStorage.setItem('vuihoc_device_id', created);
+      if (!localStorage.getItem('vuihoc_device_id')) {
+        localStorage.setItem('vuihoc_device_id', created);
+      }
       return created;
     }
     return generateDeviceId();
@@ -71,6 +74,17 @@ export const PlayerJoin: React.FC<PlayerJoinProps> = ({
   const [fetchingSession, setFetchingSession] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [isEditingTeamName, setIsEditingTeamName] = useState(false);
+
+  const isStaticOnlyHost = () => {
+    if (typeof window === 'undefined') return false;
+    const h = window.location.hostname.toLowerCase();
+    return (
+      h.endsWith('.pages.dev') ||
+      h.endsWith('.workers.dev') ||
+      h.endsWith('.netlify.app') ||
+      h.endsWith('.vercel.app')
+    );
+  };
 
   // Sync initialRoomCode when prop changes or is provided dynamically
   useEffect(() => {
@@ -83,7 +97,7 @@ export const PlayerJoin: React.FC<PlayerJoinProps> = ({
   const checkSession = (codeToCheck: string, retryCount = 0) => {
     const cleanCode = codeToCheck.trim().toUpperCase();
     if (cleanCode.length >= 4 && cleanCode.length <= 6) {
-      if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      if (!isStaticOnlyHost()) {
         if (retryCount === 0 && !sessionData) setFetchingSession(true);
         if (retryCount === 0) setFetchError(null);
         fetch(`/api/session/${encodeURIComponent(cleanCode)}`, { cache: 'no-store' })
@@ -112,7 +126,7 @@ export const PlayerJoin: React.FC<PlayerJoinProps> = ({
             setFetchingSession(false);
           });
       } else {
-        // In Serverless mode (Cloudflare / remote production):
+        // In Serverless mode (Cloudflare / remote static):
         // Query room info directly via realtime channel watchRoom / sync_request
         realtime.watchRoom(cleanCode, deviceId);
       }
@@ -174,19 +188,20 @@ export const PlayerJoin: React.FC<PlayerJoinProps> = ({
       }
     });
 
-    // 4. Fallback interval polling for local server only
+    // 4. Fallback interval polling for Node server (works on localhost, LAN Wi-Fi IP, and Cloud Run)
     let pollInterval: any = null;
-    if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+    if (!isStaticOnlyHost()) {
       pollInterval = setInterval(() => {
         fetch(`/api/session/${encodeURIComponent(cleanCode)}`, { cache: 'no-store' })
           .then(res => res.ok ? res.json() : null)
           .then(data => {
             if (data?.session) {
               setSessionData(data.session);
+              setFetchError(null);
             }
           })
           .catch(() => {});
-      }, 1500);
+      }, 2000);
     }
 
     return () => {

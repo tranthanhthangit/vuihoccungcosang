@@ -16,19 +16,22 @@ import { HistoryPage } from './pages/HistoryPage';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { MemberProfilePage } from './components/profile/MemberProfilePage';
 import { DEFAULT_GAMES } from './data/defaultGames';
-import { getGameById, getTeacherActiveRoomCount, registerActiveRoom, closeActiveRoom } from './services/gameStorage';
+import { getGameById, refreshGamesFromServer, getTeacherActiveRoomCount, registerActiveRoom, closeActiveRoom } from './services/gameStorage';
 import { Modal } from './components/common/Modal';
 import { realtime } from './services/realtimeClient';
 import { useAuth } from './context/AuthContext';
 import { Crown, AlertTriangle } from 'lucide-react';
-import { QRQuizModule } from './components/qrQuiz/QRQuizModule';
+import { QRQuizModule, QRTab } from './components/qrQuiz/QRQuizModule';
 import { QRHostScreen } from './components/qrQuiz/QRHostScreen';
 import { QRScannerHUD } from './components/qrQuiz/QRScannerHUD';
 import { QRStudent, QRQuestionPack, QRAnswerSubmission, QRSessionHistoryRecord } from './types/qrQuiz';
 import { getQRStudents, getQRQuestionPacks, saveQRSessionHistory } from './services/qrStorage';
 
+import { CreateRoomPage } from './pages/CreateRoomPage';
+
 export type AppView =
   | 'home'
+  | 'create_room'
   | 'games_list'
   | 'builder'
   | 'host'
@@ -59,7 +62,7 @@ export default function App() {
   const headerHideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [hostSessionKey, setHostSessionKey] = useState<number>(() => Date.now());
   const [hostRoomCodeFromUrl, setHostRoomCodeFromUrl] = useState<string>('');
-  const [profileInitialTab, setProfileInitialTab] = useState<'games' | 'history' | 'info' | 'password'>('games');
+  const [profileInitialTab, setProfileInitialTab] = useState<'games' | 'history' | 'info' | 'password' | 'classes'>('info');
 
   // QR Rotating Card Quiz States
   const [qrSessionConfig, setQrSessionConfig] = useState<{
@@ -75,6 +78,7 @@ export default function App() {
   const [qrIsLocked, setQrIsLocked] = useState<boolean>(false);
   const [qrIsRevealed, setQrIsRevealed] = useState<boolean>(false);
   const [qrScannerRoomCode, setQrScannerRoomCode] = useState<string>('');
+  const [qrInitialTab, setQrInitialTab] = useState<QRTab>('host');
 
   const handleFinishQRQuiz = () => {
     if (!qrSessionConfig) return;
@@ -95,12 +99,12 @@ export default function App() {
           const isCorrect = ans ? ans.isCorrect || ans.selectedAnswer === q.correctAnswer : false;
           if (isCorrect) {
             correctCount++;
-            totalScore += q.points || 10;
+            totalScore += q.points || 1;
           }
           answersList.push({
             questionId: q.id,
             questionTitle: q.prompt || q.title,
-            chosenAnswer: ans?.selectedAnswer || ans?.answer || 'A',
+            chosenAnswer: ans?.selectedAnswer || ans?.answer || 'Chưa quét',
             correctAnswer: q.correctAnswer,
             isCorrect,
           });
@@ -234,11 +238,33 @@ export default function App() {
       } else if (pathname.includes('/join') || roomParam) {
         setPlayerRoomCode(roomParam);
         setCurrentView('player');
+      } else if (pathname.includes('/games/create-word-drag')) {
+        const gameId = params.get('id');
+        if (gameId) {
+          const found = getGameById(gameId);
+          setEditingGame(found || null);
+          if (!found) {
+            refreshGamesFromServer().then(() => {
+              const refetched = getGameById(gameId);
+              if (refetched) setEditingGame(refetched);
+            });
+          }
+        } else {
+          setEditingGame(null);
+        }
+        setBuilderMode('word_drag');
+        setCurrentView('builder');
       } else if (pathname.includes('/games/create-quiz') || pathname.includes('/quiz/create')) {
         const gameId = params.get('id');
         if (gameId) {
           const found = getGameById(gameId);
           setEditingGame(found || null);
+          if (!found) {
+            refreshGamesFromServer().then(() => {
+              const refetched = getGameById(gameId);
+              if (refetched) setEditingGame(refetched);
+            });
+          }
         } else {
           setEditingGame(null);
         }
@@ -249,28 +275,47 @@ export default function App() {
         if (gameId) {
           const found = getGameById(gameId);
           setEditingGame(found || null);
+          if (!found) {
+            refreshGamesFromServer().then(() => {
+              const refetched = getGameById(gameId);
+              if (refetched) setEditingGame(refetched);
+            });
+          }
         } else {
           setEditingGame(null);
         }
         setBuilderMode('custom');
         setCurrentView('builder');
       } else if (pathname.includes('/games/builder') || pathname.includes('/games/create')) {
-        const gameId = params.get('id');
-        if (gameId) {
-          const found = getGameById(gameId);
+        const applyBuilderGame = (found: Game | undefined) => {
           setEditingGame(found || null);
-          if (found && found.gameType === 'custom') {
+          if (found && (found.gameType === 'word_drag_drop' || found.questions?.[0]?.type === 'word_drag_drop')) {
+            setBuilderMode('word_drag');
+          } else if (found && found.gameType === 'custom') {
             setBuilderMode('custom');
-          } else if (found && (found.gameType === 'multiple_choice' || !found.questions?.[0]?.canvasConfig)) {
+          } else if (found && (found.gameType === 'multiple_choice' || (!found.questions?.[0]?.canvasConfig && found.questions?.[0]?.type !== 'drag_drop'))) {
             setBuilderMode('question');
           } else {
             setBuilderMode('interactive');
+          }
+        };
+        const gameId = params.get('id');
+        if (gameId) {
+          const found = getGameById(gameId);
+          applyBuilderGame(found);
+          if (!found) {
+            refreshGamesFromServer().then(() => {
+              const refetched = getGameById(gameId);
+              if (refetched) applyBuilderGame(refetched);
+            });
           }
         } else {
           setEditingGame(null);
           setBuilderMode('interactive');
         }
         setCurrentView('builder');
+      } else if (pathname.includes('/create-room') || pathname.includes('/create_room')) {
+        setCurrentView('create_room');
       } else if (pathname.includes('/games')) {
         setCurrentView('games_list');
       } else if (pathname.includes('/history')) {
@@ -429,7 +474,7 @@ export default function App() {
   };
 
   return (
-    <div className={`bg-slate-100/70 text-slate-800 flex flex-col font-sans selection:bg-amber-200 ${
+    <div className={`w-full max-w-full overflow-x-hidden bg-slate-100/70 text-slate-800 flex flex-col font-sans selection:bg-amber-200 ${
       currentView === 'player' && isPlayerInSession ? 'h-[100dvh] max-h-[100dvh] overflow-hidden' : 'min-h-[100dvh]'
     }`}>
       {/* Slide-down Top Header for Student in Session: Ẩn mặc định, chỉ hiện khi vuốt từ trên xuống */}
@@ -503,7 +548,7 @@ export default function App() {
             } else if (currentView === 'host') {
               setShowHostExitConfirm(true);
             } else {
-              navigateTo('games_list', '/games');
+              navigateTo('create_room', '/create-room');
             }
           }}
           onCreateDefaultRoom={() => {
@@ -512,7 +557,7 @@ export default function App() {
             } else if (currentView === 'host') {
               setShowHostExitConfirm(true);
             } else {
-              navigateTo('games_list', '/games');
+              navigateTo('create_room', '/create-room');
             }
           }}
           onCreateDualRoom={() => {
@@ -531,7 +576,11 @@ export default function App() {
               navigateTo('player', '/join');
             }
           }}
-          onOpenQRQuiz={() => navigateTo('qr_quiz', '/qr-quiz')}
+          onCreateNewGame={handleCreateNewGame}
+          onOpenQRQuiz={(tab) => {
+            if (tab) setQrInitialTab(tab);
+            navigateTo('qr_quiz', '/qr-quiz');
+          }}
           onOpenAdminPortal={() => navigateTo('admin_dashboard', '/admin')}
           onOpenProfile={(tab) => {
             if (tab) setProfileInitialTab(tab);
@@ -541,17 +590,40 @@ export default function App() {
       )}
 
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col min-h-0">
+      <main className="flex-1 flex flex-col min-h-0 w-full max-w-full overflow-x-hidden">
         {currentView === 'home' && (
           <HomePage
             onQuickPlay={handleQuickPlay}
             onOpenGamesBank={() => navigateTo('games_list', '/games')}
             onCreateGame={handleCreateNewGame}
-            onCreateDualRoom={() => setIsDualRoomModalOpen(true)}
+            onCreateDualRoom={() => navigateTo('create_room', '/create-room')}
             onJoinRoom={() => navigateTo('player', '/join')}
-            onOpenQRQuiz={() => navigateTo('qr_quiz', '/qr-quiz')}
+            onOpenQRQuiz={(tab) => {
+              if (tab) setQrInitialTab(tab);
+              navigateTo('qr_quiz', '/qr-quiz');
+            }}
             onViewHistory={() => navigateTo('history', '/history')}
             onOpenProfile={() => navigateTo('member_profile', '/profile')}
+          />
+        )}
+
+        {currentView === 'create_room' && (
+          <CreateRoomPage
+            onCreateSingleRoom={() => {
+              navigateTo('games_list', '/games');
+            }}
+            onCreateDualRoom={() => {
+              setIsDualRoomModalOpen(true);
+            }}
+            onOpenMyRooms={() => {
+              navigateTo('games_list', '/games');
+            }}
+            onOpenHistory={() => {
+              navigateTo('history', '/history');
+            }}
+            onOpenReports={() => {
+              navigateTo('history', '/history');
+            }}
           />
         )}
 
@@ -654,6 +726,7 @@ export default function App() {
 
         {currentView === 'qr_quiz' && (
           <QRQuizModule
+            initialTab={qrInitialTab}
             onStartHostSession={(cfg) => {
               setQrSessionConfig(cfg);
               setQrQuestionIndex(0);

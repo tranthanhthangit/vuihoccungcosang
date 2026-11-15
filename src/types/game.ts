@@ -103,7 +103,7 @@ export interface Question {
   options: QuestionOption[];
   timeLimit: number; // in seconds, default 20 or 25 (0 = không tính thời gian)
   noTimeLimit?: boolean; // Lựa chọn không tính thời gian trả lời câu hỏi (cô bấm kết thúc)
-  points: number; // default 10
+  points: number; // default 1 (1 câu đúng là 1 điểm)
   explanation?: string;
   // Multiple correct answers vs single correct answer
   allowMultipleCorrect?: boolean;
